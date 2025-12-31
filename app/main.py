@@ -129,11 +129,13 @@ async def tiendanube_login():
     return RedirectResponse(auth_url)
 
 @app.get("/tiendanube/callback")
-async def tiendanube_callback(code: str):
+async def tiendanube_callback(request: Request, code: str):
+    print(f"CALLBACK HIT {request.url} code={code}")
     try:
         TiendaNubeAuth.exchange_code_for_token(code)
         return RedirectResponse(url="/tracking")
     except Exception as e:
+        print(f"Callback Error: {e}")
         return JSONResponse(status_code=400, content={"error": f"Auth failed: {str(e)}"})
 
 @app.post("/api/update-tracking")
