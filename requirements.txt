@@ -1,4 +1,5 @@
 PyPDF2
+reportlab
 fastapi
 uvicorn
 gunicorn
