@@ -28,6 +28,9 @@ class TiendaNubeAuth:
 
     @staticmethod
     def exchange_code_for_token(code):
+        if not code:
+            raise ValueError("No code provided")
+            
         url = "https://www.tiendanube.com/apps/authorize/token"
         data = {
             "client_id": CLIENT_ID,
@@ -37,39 +40,60 @@ class TiendaNubeAuth:
             "redirect_uri": REDIRECT_URI
         }
         resp = requests.post(url, json=data)
-        if resp.status_code == 200:
+        
+        # Log status and partial body (avoid logging raw secrets if possible, but identifying error is key)
+        print(f"Token Exchange Status: {resp.status_code}")
+        try:
             token_data = resp.json()
+        except:
+             print(f"Token Exchange Body (Raw): {resp.text}")
+             raise ValueError("Invalid JSON response from TiendaNube")
+
+        # Validate Critical Fields
+        access_token = token_data.get("access_token")
+        token_type = token_data.get("token_type")
+        user_id = token_data.get("user_id")
+        
+        if not access_token or not token_type or not user_id:
+             # Log partial details for debugging
+             safe_log = {k: v for k, v in token_data.items() if k != 'access_token'}
+             print(f"Token Exchange Failed Validation: {safe_log}")
+             raise ValueError(f"Missing critical fields in token response. Status={resp.status_code}")
+
+        if resp.status_code != 200:
+             # Even if fields exist, if status is bad, we shouldn't trust it, but usually successful response is 200
+             raise ValueError(f"Error exchanging code: {resp.text}")
+
+        # If we reached here, data is valid
+        print(f"Token Exchange Success. User ID: {user_id}")
+
+        # Save to DB
+        with next(get_session()) as session:
             
-            # Save to DB
-            with next(get_session()) as session:
-                user_id = token_data.get("user_id")
-                
-                # Check existence
-                statement = select(TiendaNubeToken).where(TiendaNubeToken.user_id == user_id)
-                results = session.exec(statement)
-                existing_token = results.first()
-                
-                encrypted_access_token = encrypt_token(token_data.get("access_token"))
-                
-                if existing_token:
-                    existing_token.access_token_encrypted = encrypted_access_token
-                    existing_token.token_type = token_data.get("token_type")
-                    existing_token.scope = token_data.get("scope")
-                    session.add(existing_token)
-                else:
-                    new_token = TiendaNubeToken(
-                        access_token_encrypted=encrypted_access_token,
-                        token_type=token_data.get("token_type"),
-                        scope=token_data.get("scope"),
-                        user_id=user_id
-                    )
-                    session.add(new_token)
-                
-                session.commit()
-                
-            return token_data
-        else:
-            raise Exception(f"Error exchanging code: {resp.text}")
+            # Check existence
+            statement = select(TiendaNubeToken).where(TiendaNubeToken.user_id == user_id)
+            results = session.exec(statement)
+            existing_token = results.first()
+            
+            encrypted_access_token = encrypt_token(access_token)
+            
+            if existing_token:
+                existing_token.access_token_encrypted = encrypted_access_token
+                existing_token.token_type = token_type
+                existing_token.scope = token_data.get("scope")
+                session.add(existing_token)
+            else:
+                new_token = TiendaNubeToken(
+                    access_token_encrypted=encrypted_access_token,
+                    token_type=token_type,
+                    scope=token_data.get("scope"),
+                    user_id=user_id
+                )
+                session.add(new_token)
+            
+            session.commit()
+            
+        return token_data
 
     @staticmethod
     def get_valid_token():
