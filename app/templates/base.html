@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Andreani Automatización{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/styles.css?v=3">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <!-- TomSelect for Searchable Dropdowns -->
+    <link href="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/css/tom-select.bootstrap5.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/js/tom-select.complete.min.js"></script>
+</head>
+
+<body>
+    <!-- Header with Toggle and Centered Brand -->
+    <header>
+        <button id="menuToggle" class="menu-toggle">
+            <i class="fas fa-bars"></i>
+        </button>
+
+        <a href="/" class="brand-center">
+            <i class="fas fa-rocket"></i>
+            ShipFlow
+        </a>
+    </header>
+
+    <!-- Sidebar Drawer -->
+    <div id="sidebar" class="sidebar">
+        <div class="sidebar-header">
+            <h3 style="color: var(--primary-color); margin: 0;">Menú</h3>
+            <button id="menuClose" class="close-btn"><i class="fas fa-times"></i></button>
+        </div>
+        <nav class="sidebar-nav">
+            <a href="/" class="{% if request.url.path == '/' %}active{% endif %}">
+                <i class="fas fa-home"></i> Inicio
+            </a>
+            <a href="/orders-ready" class="{% if request.url.path == '/orders-ready' %}active{% endif %}">
+                <i class="fas fa-list-check"></i> Pedidos Listos
+            </a>
+            <a href="/excel" class="{% if request.url.path == '/excel' %}active{% endif %}">
+                <i class="fas fa-file-excel"></i> Procesar Pedidos
+            </a>
+            <a href="/pdf" class="{% if request.url.path == '/pdf' %}active{% endif %}">
+                <i class="fas fa-tags"></i> Etiquetar con SKU
+            </a>
+            <a href="/tracking" class="{% if request.url.path == '/tracking' %}active{% endif %}">
+                <i class="fas fa-truck"></i> Subir Seguimientos
+            </a>
+        </nav>
+    </div>
+
+    <!-- Overlay -->
+    <div id="overlay" class="overlay"></div>
+
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+
+    <script src="/static/js/main.js"></script>
+    <script>
+        // Sidebar Toggle Logic
+        document.addEventListener('DOMContentLoaded', () => {
+            const toggleBtn = document.getElementById('menuToggle');
+            const closeBtn = document.getElementById('menuClose');
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('overlay');
+
+            function openMenu() {
+                sidebar.classList.add('open');
+                overlay.classList.add('open');
+            }
+
+            function closeMenu() {
+                sidebar.classList.remove('open');
+                overlay.classList.remove('open');
+            }
+
+            if (toggleBtn) toggleBtn.addEventListener('click', openMenu);
+            if (closeBtn) closeBtn.addEventListener('click', closeMenu);
+            if (overlay) overlay.addEventListener('click', closeMenu);
+        });
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+
+</html>

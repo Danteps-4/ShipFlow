@@ -1,0 +1,434 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h2>Pedidos Listos para Enviar (TiendaNube)</h2>
+    <p class="text-muted">Selecciona los pedidos para descargar el CSV de Andreani.</p>
+
+    <!-- Controls Toolbar -->
+    <div
+        style="background: var(--surface-color); padding: 1rem; border-radius: 8px; border: 1px solid var(--border-color); box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 2rem; display: flex; flex-direction: column; gap: 1rem;">
+
+        <!-- Top Row: Filters & Search -->
+        <div style="display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: space-between;">
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                <input type="text" id="searchInput" placeholder="Buscar Nro Orden..."
+                    style="padding: 0.5rem; background: var(--bg-color); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 4px;">
+                <button class="btn btn-sm" onclick="fetchOrders()">
+                    <i class="fas fa-search"></i>
+                </button>
+            </div>
+
+            <!-- Stage Mode Toggle -->
+            <div class="toggle-group"
+                style="display: flex; background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 4px; padding: 2px;">
+                <button id="stage-unpacked" class="btn-toggle active" onclick="setStage('unpacked')"
+                    style="border: none; background: var(--primary-color); color: white; padding: 0.4rem 1rem; border-radius: 2px; cursor: pointer; display: flex; align-items: center; gap: 0.5rem;">
+                    Por Empaquetar <span id="badge-unpacked" class="badge-count"
+                        style="background: rgba(0,0,0,0.2); padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.8rem;">-</span>
+                </button>
+                <button id="stage-packed" class="btn-toggle" onclick="setStage('packed')"
+                    style="border: none; background: transparent; color: var(--text-muted); padding: 0.4rem 1rem; border-radius: 2px; cursor: pointer; display: flex; align-items: center; gap: 0.5rem;">
+                    Por Enviar <span id="badge-packed" class="badge-count"
+                        style="background: rgba(255,255,255,0.1); padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.8rem;">-</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Bottom Row: Paging & Action -->
+        <div
+            style="display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: space-between; border-top: 1px solid var(--border-color); padding-top: 1rem;">
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                <button class="btn btn-secondary btn-sm" onclick="loadPage(currPage - 1)">
+                    <i class="fas fa-chevron-left"></i>
+                </button>
+                <span id="pageIndicator"
+                    style="font-weight: 600; min-width: 80px; text-align: center; color: var(--text-color);">Página
+                    1</span>
+                <button class="btn btn-secondary btn-sm" onclick="loadPage(currPage + 1)">
+                    <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
+
+            <!-- Debug Toggle -->
+            <label
+                style="display: flex; align-items: center; cursor: pointer; gap: 0.5rem; color: var(--text-color); font-size: 0.9rem;">
+                <input type="checkbox" id="debugToggle" onchange="fetchOrders()">
+                <span>Modo Debug</span>
+            </label>
+
+            <div style="display:flex; gap:0.5rem">
+                <!-- Secondary Download Button -->
+                <button class="btn btn-secondary" onclick="generateCsv()" title="Descargar CSV para uso manual">
+                    <i class="fas fa-download"></i> Descargar CSV
+                </button>
+                <!-- Primary Process Button -->
+                <button class="btn" onclick="processBatch()">
+                    <i class="fas fa-cogs"></i> Procesar Pedidos
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Message Area -->
+    <div id="messageArea"></div>
+
+    <!-- Debug Panel -->
+    <div id="debugPanel"
+        style="display: none; background: #2d3748; padding: 1rem; margin-bottom: 2rem; border-radius: 8px; border: 1px solid #4a5568;">
+        <!-- ... (Debug Panel Content Unchanged) ... -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+            <h3 style="margin: 0; color: #e2e8f0; font-size: 1.1rem;">🐞 Debug Info (Últimos pedidos analizados)</h3>
+            <input type="text" id="debugFilter" placeholder="Filtrar por Orden #" onkeyup="filterDebugTable()"
+                style="padding: 0.25rem 0.5rem; background: #1a202c; border: 1px solid #4a5568; color: white; border-radius: 4px;">
+        </div>
+        <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; color: #cbd5e0; font-size: 0.85rem;">
+                <thead>
+                    <tr style="border-bottom: 2px solid #4a5568;">
+                        <th style="padding: 0.5rem; text-align: left;">Orden</th>
+                        <th style="padding: 0.5rem; text-align: left;">Incluida?</th>
+                        <th style="padding: 0.5rem; text-align: left;">Razón Exclusión</th>
+                        <th style="padding: 0.5rem; text-align: left;">Stages</th>
+                        <th style="padding: 0.5rem; text-align: left;">Data Cruda</th>
+                    </tr>
+                </thead>
+                <tbody id="debugTableBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Table -->
+    <div
+        style="background: var(--surface-color); border-radius: 8px; border: 1px solid var(--border-color); box-shadow: 0 1px 3px rgba(0,0,0,0.1); overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead style="background: rgba(255,255,255,0.05); border-bottom: 2px solid var(--border-color);">
+                <tr>
+                    <th style="padding: 1rem; text-align: left;"><input type="checkbox" id="selectAll"
+                            onclick="toggleAll(this)"></th>
+                    <th style="padding: 1rem; text-align: left;">Orden #</th>
+                    <th style="padding: 1rem; text-align: left;">Cliente</th>
+                    <th style="padding: 1rem; text-align: left; width: 30%;">Productos (Para Armar)</th>
+                    <th style="padding: 1rem; text-align: left;">Dirección</th>
+                    <th style="padding: 1rem; text-align: left;">CP</th>
+                    <th style="padding: 1rem; text-align: left;">Fecha</th>
+                    <th style="padding: 1rem; text-align: left;">Estado</th>
+                </tr>
+            </thead>
+            <tbody id="ordersTableBody">
+                <!-- Rows injected here -->
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currPage = 1;
+    let currStage = 'unpacked'; // 'unpacked' or 'packed'
+    let debugOrdersCache = [];
+
+    async function loadStats() {
+        try {
+            const res = await fetch('/api/orders/stats');
+            const data = await res.json();
+            if (data.ok && data.stats) {
+                document.getElementById('badge-unpacked').innerText = data.stats.unpacked || '0';
+                document.getElementById('badge-packed').innerText = data.stats.packed || '0';
+            }
+        } catch (e) {
+            console.error("Failed to load stats", e);
+        }
+    }
+
+    function setStage(stage) {
+        currStage = stage;
+        // Update visual toggle
+        const btnUnpacked = document.getElementById('stage-unpacked');
+        const btnPacked = document.getElementById('stage-packed');
+
+        if (stage === 'unpacked') {
+            btnUnpacked.style.background = 'var(--primary-color)';
+            btnUnpacked.style.color = 'white';
+            btnPacked.style.background = 'transparent';
+            btnPacked.style.color = 'var(--text-muted)';
+        } else {
+            btnPacked.style.background = 'var(--primary-color)';
+            btnPacked.style.color = 'white';
+            btnUnpacked.style.background = 'transparent';
+            btnUnpacked.style.color = 'var(--text-muted)';
+        }
+
+        currPage = 1;
+        fetchOrders();
+    }
+
+    async function loadPage(page) {
+        if (page < 1) return;
+        currPage = page;
+        document.getElementById('pageIndicator').innerText = `Página ${currPage}`;
+        await fetchOrders();
+    }
+
+    async function fetchOrders() {
+        const q = document.getElementById('searchInput').value;
+        const debugMode = document.getElementById('debugToggle').checked;
+        const tbody = document.getElementById('ordersTableBody');
+        tbody.innerHTML = '<tr><td colspan="8" style="padding: 2rem; text-align: center; color: #666;"><i class="fas fa-spinner fa-spin"></i> Cargando...</td></tr>';
+
+        // Handle Debug Panel Visibility
+        const debugPanel = document.getElementById('debugPanel');
+        debugPanel.style.display = debugMode ? 'block' : 'none';
+
+        try {
+            const params = new URLSearchParams({ page: currPage, per_page: 20, stage: currStage });
+            if (q) params.append('q', q);
+            if (debugMode) params.append('debug', 'true');
+
+            const res = await fetch(`/api/orders/ready?${params.toString()}`);
+            const data = await res.json();
+
+            if (!res.ok || data.ok === false) {
+                const errorMsg = data.error || res.statusText;
+                const tb = data.traceback ? `\n\nTraceback:\n${data.traceback}` : "";
+                throw new Error(errorMsg + tb);
+            }
+
+            // Render Results
+            renderTable(data.results || []);
+
+            // Render Debug if present
+            if (data.debug) {
+                debugOrdersCache = data.debug;
+                renderDebugTable();
+            } else {
+                debugOrdersCache = [];
+                document.getElementById('debugTableBody').innerHTML = '';
+            }
+
+        } catch (e) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="8" style="padding: 1rem; background: #fff3cd; color: #856404;">
+                        <strong>Error:</strong><br>
+                        <pre style="white-space: pre-wrap; margin-top: 0.5rem; font-size: 0.85rem;">${e.message}</pre>
+                    </td>
+                </tr>`;
+        }
+    }
+
+    function renderDebugTable() {
+        const tbody = document.getElementById('debugTableBody');
+        tbody.innerHTML = '';
+        const filterVal = document.getElementById('debugFilter').value.toLowerCase();
+
+        debugOrdersCache.forEach(o => {
+            if (filterVal && (!o.number || !o.number.toString().includes(filterVal))) return;
+
+            const tr = document.createElement('tr');
+            tr.style.borderBottom = '1px solid #4a5568';
+            tr.style.backgroundColor = o.included ? 'rgba(72, 187, 120, 0.1)' : 'rgba(245, 101, 101, 0.1)';
+
+            tr.innerHTML = `
+                <td style="padding: 0.5rem; font-weight: bold;">${o.number}</td>
+                <td style="padding: 0.5rem;">${o.included ? '✅ SI' : '❌ NO'}</td>
+                <td style="padding: 0.5rem; color: ${o.included ? '#68d391' : '#fc8181'};">${o.excluded_reason || '-'}</td>
+                <td style="padding: 0.5rem;">
+                    Pay: ${o.payment_status}<br>
+                    Ship: ${o.shipping_status}<br>
+                    Next: ${o.next_action}<br>
+                    Fulfill: ${o.fulfillment_status_0 || 'None'} (${o.fulfillments_count})
+                </td>
+                <td style="padding: 0.5rem; font-family: monospace; font-size: 0.75rem; color: #a0aec0;">
+                   ID: ${o.id}
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        if (tbody.children.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="padding: 1rem; text-align: center;">Sin datos debug</td></tr>';
+        }
+    }
+
+    function filterDebugTable() {
+        renderDebugTable();
+    }
+
+    function renderTable(orders) {
+        // ... (Table render logic unchanged) ...
+        // Re-paste to ensure we don't cut it, but tool wants replacement chunk.
+        // I should just replace the buttons and append the JS. But since I can't partially edit JS easily due to context.
+        // I will replicate renderTable from previous context
+        const tbody = document.getElementById('ordersTableBody');
+        tbody.innerHTML = '';
+
+        if (orders.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" style="padding: 2rem; text-align: center;">No hay pedidos en esta vista.</td></tr>';
+            return;
+        }
+
+        orders.forEach(o => {
+            const tr = document.createElement('tr');
+            tr.style.borderBottom = "1px solid var(--border-color)";
+
+            // Validation logic for visual cues
+            const missingZip = !o.zipcode;
+            if (missingZip) tr.style.backgroundColor = "rgba(239, 68, 68, 0.1)"; // Dark mode warning
+
+            // Render Products List
+            let productsHtml = '';
+            if (o.products && o.products.length > 0) {
+                productsHtml = `<ul style="list-style: none; padding: 0; margin: 0; font-size: 0.9rem;">`;
+                o.products.forEach(p => {
+                    productsHtml += `<li style="margin-bottom: 4px;">
+                        <span style="font-weight: 600; color: var(--text-color);">${p.quantity}x</span> 
+                        <span style="color: var(--text-color);">${p.name}</span>
+                        <div style="font-size: 0.75rem; color: var(--text-muted); padding-left: 1.2rem;">SKU: ${p.sku || '-'}</div>
+                    </li>`;
+                });
+                productsHtml += `</ul>`;
+            } else {
+                productsHtml = '<span style="color: var(--text-muted); font-style: italic;">Sin productos</span>';
+            }
+
+            const paymentBadgeStyle = o.payment_status === 'paid'
+                ? 'background: rgba(16, 185, 129, 0.2); color: var(--success-color);'
+                : 'background: rgba(245, 158, 11, 0.2); color: var(--warning-color);';
+
+            tr.innerHTML = `
+                <td style="padding: 1rem; vertical-align: top;"><input type="checkbox" class="order-check" value="${o.number}"></td>
+                <td style="padding: 1rem; vertical-align: top; font-weight: 600;">${o.number}</td>
+                <td style="padding: 1rem; vertical-align: top;">
+                    ${o.customer_name || '-'}
+                </td>
+                <td style="padding: 1rem; vertical-align: top;">
+                    ${productsHtml}
+                </td>
+                <td style="padding: 1rem; vertical-align: top;">
+                    <div style="font-size: 0.9rem;">${o.address || '-'}</div>
+                    <div style="font-size: 0.8rem; color: var(--text-muted);">${o.city || ''}</div>
+                </td>
+                <td style="padding: 1rem; vertical-align: top;">
+                    ${missingZip ? '<span style="color:var(--error-color); font-weight:bold;">FALTA CP</span>' : o.zipcode}
+                </td>
+                <td style="padding: 1rem; vertical-align: top; white-space: nowrap;">
+                    ${new Date(o.created_at).toLocaleDateString()}
+                </td>
+                <td style="padding: 1rem; vertical-align: top; font-size: 0.85rem;">
+                    <span style="display: inline-block; padding: 2px 6px; border-radius: 4px; ${paymentBadgeStyle} margin-bottom: 2px;">
+                        ${o.payment_status}
+                    </span><br>
+                    <span style="color: var(--text-muted);">${o.shipping_option || '-'}</span>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    function toggleAll(source) {
+        document.querySelectorAll('.order-check').forEach(c => c.checked = source.checked);
+    }
+
+    async function processBatch() {
+        const checks = document.querySelectorAll('.order-check:checked');
+        if (checks.length === 0) {
+            alert("Seleccione al menos un pedido.");
+            return;
+        }
+
+        const numbers = Array.from(checks).map(c => parseInt(c.value));
+        const btn = document.querySelector('button[onclick="processBatch()"]');
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Procesando...';
+        btn.disabled = true;
+
+        try {
+            const res = await fetch('/api/orders/process-batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ order_numbers: numbers })
+            });
+
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+                throw new Error(data.error || "Error processing batch");
+            }
+
+            // Redirect
+            window.location.href = data.redirect_url;
+
+        } catch (e) {
+            alert("Error procesando pedidos: " + e.message);
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
+        }
+    }
+
+    async function generateCsv() {
+        // ... (Keep existing generateCsv logic) ...
+        const checks = document.querySelectorAll('.order-check:checked');
+        if (checks.length === 0) {
+            alert("Seleccione al menos un pedido.");
+            return;
+        }
+
+        const numbers = Array.from(checks).map(c => parseInt(c.value));
+        // Use a generic selector or specific ID if added. For now generic querySelector finds the first one button with onclick which is risky if we have two functions with similar onclicks but different implementation... 
+        // Better to target 'this' passed from handler or getElementById. But since I can't easily change previous signature...
+        // I will rely on finding the button that called this. Actually 'this' is not passed. 
+        // I'll assume only one download button exists or accept I replace texts on others.
+        // Wait, I can't easily access the button element without passing 'this'. 
+        // For simplicity's sake, I will NOT change the button text for secondary download, just block UI or use a global loader.
+        // OR, I can find it by title.
+        const btn = document.querySelector('button[onclick="generateCsv()"]');
+        if (btn) {
+            var originalHtml = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generando...';
+            btn.disabled = true;
+        }
+
+        try {
+            const res = await fetch('/andreani/csv', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ order_numbers: numbers })
+            });
+
+            if (!res.ok) {
+                // If it's JSON error
+                const contentType = res.headers.get("content-type");
+                let errMsg = res.statusText;
+                if (contentType && contentType.indexOf("application/json") !== -1) {
+                    const err = await res.json();
+                    errMsg = err.error || errMsg;
+                }
+                throw new Error(errMsg);
+            }
+
+            // Download blob
+            const blob = await res.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = "ventas_andreani_gen.csv";
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+
+        } catch (e) {
+            alert("Error generando CSV: " + e.message);
+        } finally {
+            if (btn) {
+                btn.innerHTML = originalHtml;
+                btn.disabled = false;
+            }
+        }
+    }
+
+    // Load initially
+    fetchOrders();
+    loadStats(); // Fetch counters
+</script>
+{% endblock %}

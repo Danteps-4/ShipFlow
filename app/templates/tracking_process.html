@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h2>Subida de Seguimientos a Tienda Nube</h2>
+    <p class="text-muted">Actualiza el estado de las ordenes y carga el codigo de seguimiento masivamente.</p>
+
+    {% if not is_authenticated %}
+    <div style="text-align: center; margin-top: 3rem;">
+        <div class="card" style="max-width: 400px; margin: 0 auto; padding: 2rem;">
+            <i class="fas fa-store fa-3x" style="color: var(--primary-color); margin-bottom: 1rem;"></i>
+            <h3>Conectar con Tienda Nube</h3>
+            <p>Es necesario otorgar permisos para actualizar las ordenes.</p>
+            <a href="/tiendanube/login" class="btn" style="margin-top: 1rem; display: inline-block;">
+                <i class="fas fa-sign-in-alt"></i> Iniciar Sesión
+            </a>
+        </div>
+    </div>
+    {% else %}
+
+    <div id="upload-step">
+        <div style="text-align: right; margin-bottom: 1rem;">
+            <a href="/tiendanube/login" class="btn btn-sm"
+                style="background-color: #f8f9fa; color: #333; border: 1px solid #ddd;">
+                <i class="fas fa-sync-alt"></i> Re-conectar Cuenta
+            </a>
+        </div>
+        <div class="drop-zone" id="drop-zone-track">
+            <i class="fas fa-cloud-upload-alt fa-3x" style="color: var(--primary-color); margin-bottom: 1rem;"></i>
+            <p id="upload-text">Arrastra el archivo Excel/CSV/PDF con los seguimientos aquí</p>
+            <input type="file" id="file-input-track" accept=".csv, .xlsx, .xls, .pdf" class="hidden">
+
+            <!-- File Preview State (Hidden by default) -->
+            <div id="file-preview" class="hidden" style="margin-top: 1rem;">
+                <div class="file-card">
+                    <i class="fas fa-file-excel" style="font-size: 2rem; color: var(--success-color);"></i>
+                    <span id="file-name" style="margin: 0 1rem; font-weight: 600;">filename.csv</span>
+                </div>
+                <button id="btn-process-upload" class="btn" style="margin-top: 1rem;">
+                    Actualizar Ordenes
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="results-area" class="hidden" style="margin-top: 2rem;">
+        <h3>Resultados</h3>
+        <div id="loading" class="hidden">
+            <p><i class="fas fa-spinner fa-spin"></i> Procesando...</p>
+        </div>
+        <div class="summary-grid" id="stats" style="margin-bottom: 1rem;">
+            <!-- Stats -->
+        </div>
+        <div style="overflow-x: auto; max-height: 500px;">
+            <table id="results-table">
+                <thead>
+                    <tr>
+                        <th>Orden</th>
+                        <th>Estado</th>
+                        <th>Detalle</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if is_authenticated %}
+<script src="/static/js/tracking_process.js"></script>
+{% endif %}
+{% endblock %}

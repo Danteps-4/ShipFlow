@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h2>Proceso de Pedidos (Excel)</h2>
+    <p class="text-muted">Sube el archivo <code>ventas.csv</code> de Tienda Nube.</p>
+
+    <div id="upload-step">
+        <div class="drop-zone" id="drop-zone-csv">
+            <i class="fas fa-cloud-upload-alt fa-3x" style="color: var(--primary-color); margin-bottom: 1rem;"></i>
+            <p id="upload-text">Arrastra el archivo CSV aquí o haz clic para seleccionar</p>
+            <input type="file" id="file-input-csv" accept=".csv" class="hidden">
+
+            <!-- File Preview State (Hidden by default) -->
+            <div id="file-preview" class="hidden" style="margin-top: 1rem;">
+                <div class="file-card">
+                    <i class="fas fa-file-csv" style="font-size: 2rem; color: var(--success-color);"></i>
+                    <span id="file-name" style="margin: 0 1rem; font-weight: 600;">filename.csv</span>
+                </div>
+                <button id="btn-remove-file" class="btn-remove-file-absolute" title="Quitar archivo">
+                    <i class="fas fa-times"></i>
+                </button>
+                <button id="btn-process-upload" class="btn" style="margin-top: 1rem;">
+                    Procesar Archivo
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="process-step" class="hidden">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+            <h3>Resultados del Análisis</h3>
+            <button id="btn-generate" class="btn">
+                <i class="fas fa-file-download" style="margin-right: 0.5rem;"></i> Generar Excel
+            </button>
+        </div>
+
+        <div id="summary-stats" class="summary-grid">
+            <!-- JS will populate -->
+        </div>
+
+        <div style="overflow-x: auto;">
+            <table id="results-table">
+                <thead>
+                    <tr>
+                        <th>Orden</th>
+                        <th>Cliente</th>
+                        <th>Dirección</th>
+                        <th>Ciudad</th>
+                        <th>Tipo</th>
+                        <th>Detectado / Selección</th>
+                        <th>Estado</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- JS will populate -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Exclusion Summary Modal -->
+    <div id="exclusion-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3><i class="fas fa-check-circle" style="color: var(--success-color);"></i> Proceso Completado</h3>
+            <p>Se ha generado el archivo Excel con los pedidos válidos.</p>
+
+            <div class="modal-stats">
+                <div class="stat-item">
+                    <span class="stat-num" id="modal-valid-count">0</span>
+                    <span class="stat-desc">Cargados</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-num error" id="modal-excluded-count">0</span>
+                    <span class="stat-desc">Excluidos</span>
+                </div>
+            </div>
+
+            <div id="excluded-list-container" class="hidden">
+                <p><strong>Pedidos excluidos (Cargar manualmente):</strong></p>
+                <div class="excluded-list" id="excluded-list">
+                    <!-- Populated by JS -->
+                </div>
+                <button class="btn-secondary small" id="btn-copy-excluded">Copiar Lista</button>
+            </div>
+
+            <div class="modal-actions">
+                <button id="btn-close-modal" class="btn">Cerrar</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/excel_process.js?v=7"></script>
+{% endblock %}

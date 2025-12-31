@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+gunicorn
+sqlmodel
+psycopg2-binary
+alembic
+python-multipart
+requests
+pandas
+openpyxl
+python-dotenv
+jinja2
+itsdangerous
+aiofiles
+cryptography
+passlib[bcrypt]
+python-jose[cryptography]
