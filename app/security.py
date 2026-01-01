@@ -21,6 +21,9 @@ def encrypt_token(token: str) -> str:
     f = Fernet(get_key())
     return f.encrypt(token.encode()).decode()
 
+def decrypt_token(token_encrypted: str) -> str:
+    if not token_encrypted: return ""
+    f = Fernet(get_key())
     return f.decrypt(token_encrypted.encode()).decode()
 
 # Authentication Logic
