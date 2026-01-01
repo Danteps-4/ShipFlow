@@ -14,8 +14,9 @@ CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 REDIRECT_URI = os.getenv("REDIRECT_URI")
 from sqlmodel import select
 from app.database import engine, get_session
-from app.models import TiendaNubeToken, Store, User
+from app.models import TiendaNubeToken, Store, User, OAuthState
 from app.security import encrypt_token, decrypt_token
+import uuid
 
 class TiendaNubeAuth:
     @staticmethod
