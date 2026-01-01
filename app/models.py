@@ -31,3 +31,9 @@ class TiendaNubeToken(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     
     store: Optional[Store] = Relationship(back_populates="token")
+
+class OAuthState(SQLModel, table=True):
+    state: str = Field(primary_key=True)
+    user_id: int = Field(foreign_key="user.id")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    used: bool = Field(default=False)

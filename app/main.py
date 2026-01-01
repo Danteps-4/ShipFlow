@@ -11,6 +11,7 @@ import pandas as pd
 import io
 import traceback
 import uuid
+from datetime import timedelta
 
 # App Imports
 from app.services.data_processing import AndreaniProcessor
@@ -44,6 +45,69 @@ if os.name == 'nt':
     OUTPUT_PDF = os.path.join(BASE_DIR, "temp_output_pdf.pdf")
 
 processor = AndreaniProcessor(ANDREANI_TEMPLATE)
+
+# --- Auth Routes ---
+from pydantic import BaseModel
+from fastapi.security import OAuth2PasswordRequestForm
+from app.models import User
+from app.security import get_password_hash, verify_password, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
+from app.dependencies import get_current_user
+
+class UserCreate(BaseModel):
+    email: str
+    password: str
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+@app.post("/auth/register", response_model=Token)
+async def register(user_in: UserCreate, session: Session = Depends(get_session)):
+    # Check if exists
+    existing = session.exec(select(User).where(User.email == user_in.email)).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    new_user = User(
+        email=user_in.email,
+        password_hash=get_password_hash(user_in.password),
+        is_admin=False # Default
+    )
+    session.add(new_user)
+    session.commit()
+    session.refresh(new_user)
+    
+    # Login immediately
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": new_user.email}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.post("/auth/token", response_model=Token)
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), session: Session = Depends(get_session)):
+    # Note: OAuth2PasswordRequestForm expects "username", we use "email"
+    user = session.exec(select(User).where(User.email == form_data.username)).first()
+    if not user or not verify_password(form_data.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.email}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.get("/api/me")
+async def read_users_me(current_user: User = Depends(get_current_user)):
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "is_admin": current_user.is_admin
+    }
 
 @app.on_event("startup")
 def on_startup():
@@ -134,21 +198,21 @@ async def view_tracking_process(request: Request, store_id: int = Depends(get_cu
         "active_store_id": store_id
     })
 
-@app.get("/tiendanube/login")
-async def tiendanube_login():
-    auth_url = TiendaNubeAuth.get_auth_url()
+@app.get("/tiendanube/connect")
+async def tiendanube_connect(current_user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    auth_url = TiendaNubeAuth.get_auth_url(current_user.id, session)
     return RedirectResponse(auth_url)
 
 @app.get("/tiendanube/callback")
-async def tiendanube_callback(request: Request, code: str):
-    print(f"CALLBACK HIT {request.url} code={code}")
+async def tiendanube_callback(request: Request, code: str, state: str, session: Session = Depends(get_session)):
+    print(f"CALLBACK HIT {request.url} code={code} state={state}")
     try:
-        # Exchange returns dict with "store_id"
-        token_data_full = TiendaNubeAuth.exchange_code_for_token(code)
+        # Process Callback (validates state, links user, returns store info)
+        token_data_full = TiendaNubeAuth.process_callback(code, state, session)
         store_id = token_data_full.get("store_id")
         
         # Set cookie and redirect
-        response = RedirectResponse(url="/settings") # Go to settings to verify connection
+        response = RedirectResponse(url="/settings") # Go to settings
         response.set_cookie(key="andreani_active_store", value=str(store_id))
         return response
     except Exception as e:

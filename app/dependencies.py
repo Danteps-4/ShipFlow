@@ -1,8 +1,47 @@
 from fastapi import Request, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
 from sqlmodel import select, Session
 from app.database import get_session
-from app.models import Store, TiendaNubeToken
+from app.models import Store, TiendaNubeToken, User
+from app.security import SECRET_KEY, ALGORITHM, jwt, JWTError
 from typing import Optional
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
+
+def get_current_user_optional(token: str = Depends(oauth2_scheme), session: Session = Depends(get_session)) -> Optional[User]:
+    # Allow loose auth for initial setup if needed, but strict is better.
+    # Actually, we'll implement strict `get_current_user`
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            return None
+    except JWTError:
+        return None
+        
+    statement = select(User).where(User.email == email)
+    user = session.exec(statement).first()
+    return user
+
+async def get_current_user(token: str = Depends(oauth2_scheme), session: Session = Depends(get_session)) -> User:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+        
+    statement = select(User).where(User.email == email)
+    user = session.exec(statement).first()
+    if user is None:
+        raise credentials_exception
+    return user
 
 def get_current_store_id(request: Request) -> Optional[int]:
     # Try to get from header first (for API calls if needed later), then cookie
@@ -16,11 +55,25 @@ def get_current_store_id(request: Request) -> Optional[int]:
 
 def get_current_store(
     store_id: Optional[int] = Depends(get_current_store_id),
+    current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session)
 ) -> Optional[Store]:
+    """
+    Returns the store ONLY if it belongs to the current user.
+    """
     if not store_id:
         return None
+    
     store = session.get(Store, store_id)
+    if not store:
+        return None
+        
+    # OWNERSHIP CHECK
+    if store.user_id != current_user.id:
+        # Don't leak existence, or return 403 explicitly? 
+        # Requirement says "devuelve 403".
+        raise HTTPException(status_code=403, detail="Access to this store is forbidden")
+        
     return store
 
 def get_current_active_token(
