@@ -20,10 +20,16 @@ import uuid
 
 class TiendaNubeAuth:
     @staticmethod
-    def get_auth_url():
+    def get_auth_url(user_id: int, session): 
+        # Generate State
+        state = str(uuid.uuid4())
+        oauth_state = OAuthState(state=state, user_id=user_id)
+        session.add(oauth_state)
+        session.commit()
+        
         return (
             f"https://www.tiendanube.com/apps/{CLIENT_ID}/authorize?"
-            f"response_type=code&scope=read_orders%20write_orders%20write_products&redirect_uri={REDIRECT_URI}"
+            f"response_type=code&scope=read_orders%20write_orders%20write_products&redirect_uri={REDIRECT_URI}&state={state}"
         )
 
     @staticmethod
@@ -41,12 +47,15 @@ class TiendaNubeAuth:
         }
         resp = requests.post(url, json=data)
         
-        # Log status and partial body (avoid logging raw secrets if possible, but identifying error is key))
+        # Log status
         print(f"Token Exchange Status: {resp.status_code}")
+        
+        if resp.status_code != 200:
+             raise ValueError(f"Error exchanging code: {resp.text}")
+
         try:
             token_data = resp.json()
         except:
-             print(f"Token Exchange Body (Raw): {resp.text}")
              raise ValueError("Invalid JSON response from TiendaNube")
 
         # Validate Critical Fields
@@ -55,86 +64,81 @@ class TiendaNubeAuth:
         user_id = token_data.get("user_id")
         
         if not access_token or not token_type or not user_id:
-             # Log partial details for debugging
-             safe_log = {k: v for k, v in token_data.items() if k != 'access_token'}
-             print(f"Token Exchange Failed Validation: {safe_log}")
-             raise ValueError(f"Missing critical fields in token response. Status={resp.status_code}")
+             raise ValueError(f"Missing critical fields in token response.")
+             
+        return token_data
 
-        if resp.status_code != 200:
-             # Even if fields exist, if status is bad, we shouldn't trust it, but usually successful response is 200
-             raise ValueError(f"Error exchanging code: {resp.text}")
-
-        # If we reached here, data is valid
-        print(f"Token Exchange Success. User ID (TN Store ID): {user_id}")
-
-        store_id_internal = None
-
-        # Save to DB
-        with next(get_session()) as session:
-            # 0. Ensure Admin User Exists (Sprint 2 Temporary)
-            admin_user_id = 1
-            admin_user = session.get(User, admin_user_id)
-            if not admin_user:
-                print("Admin User (ID 1) not found. Creating default admin.")
-                admin_user = User(
-                    id=1, # Force ID 1
-                    email="admin@example.com",
-                    password_hash="pbkdf2:sha256:260000$placeholder$hash", # Placeholder, auth not active yet
-                    is_admin=True
-                )
-                session.add(admin_user)
-                session.commit()
-                # No refresh needed, we know ID is 1
+    @staticmethod
+    def process_callback(code: str, state: str, session):
+        # 1. Verify State
+        oauth_state = session.get(OAuthState, state)
+        if not oauth_state:
+            raise ValueError("Invalid state parameter (not found)")
+        if oauth_state.used:
+            raise ValueError("Invalid state parameter (already used)")
             
-            # 1. Find or Create Store
-            statement_store = select(Store).where(Store.tiendanube_user_id == int(user_id))
-            store = session.exec(statement_store).first()
-            
-            if not store:
-                print(f"New Store detected for TN ID {user_id}. Creating...")
-                
-                store = Store(
-                    name=f"Tienda {user_id}",
-                    tiendanube_user_id=int(user_id),
-                    user_id=admin_user_id
-                )
-                session.add(store)
-                session.commit()
-                session.refresh(store)
-            
-            store_id_internal = store.id
-            
-            # 2. Update/Create Token linked to this Store
-            # ... (rest remains same) ...
-            # 2. Update/Create Token linked to this Store
-            # Check existence by Store ID (Unique Constraint)
-            statement_token = select(TiendaNubeToken).where(TiendaNubeToken.store_id == store.id)
-            existing_token = session.exec(statement_token).first()
-            
-            encrypted_access_token = encrypt_token(access_token)
-            
-            if existing_token:
-                print(f"Updating existing token for Store {store.id}")
-                existing_token.access_token_encrypted = encrypted_access_token
-                existing_token.token_type = token_type
-                existing_token.scope = token_data.get("scope")
-                existing_token.user_id = int(user_id) 
-                session.add(existing_token)
-            else:
-                print(f"Creating new token for Store {store.id}")
-                new_token = TiendaNubeToken(
-                    access_token_encrypted=encrypted_access_token,
-                    token_type=token_type,
-                    scope=token_data.get("scope"),
-                    user_id=int(user_id),
-                    store_id=store.id
-                )
-                session.add(new_token)
-            
+        # Mark used
+        oauth_state.used = True
+        session.add(oauth_state)
+        
+        # 2. Exchange Code
+        token_data = TiendaNubeAuth.exchange_code_for_token(code)
+        tn_user_id = int(token_data.get("user_id"))
+        access_token = token_data.get("access_token")
+        token_type = token_data.get("token_type")
+        scope = token_data.get("scope")
+        
+        # 3. Find or Create Store
+        # Lock to user_id from state
+        user_id = oauth_state.user_id
+        
+        statement_store = select(Store).where(Store.tiendanube_user_id == tn_user_id)
+        store = session.exec(statement_store).first()
+        
+        if store:
+            # CHECK OWNERSHIP
+            if store.user_id != user_id:
+                raise ValueError("Esta tienda ya está conectada a otra cuenta de usuario.")
+            print(f"Updating Store {store.id} for user {user_id}")
+        else:
+            print(f"Creating New Store for TN ID {tn_user_id} linked to user {user_id}")
+            store = Store(
+                name=f"Tienda {tn_user_id}",
+                tiendanube_user_id=tn_user_id,
+                user_id=user_id
+            )
+            session.add(store)
             session.commit()
+            session.refresh(store)
             
-        # Return merged data including our internal store_id
-        token_data["store_id"] = store_id_internal
+        # 4. Upsert Token
+        # Use store.id to find token (one token per store)
+        statement_token = select(TiendaNubeToken).where(TiendaNubeToken.store_id == store.id)
+        existing_token = session.exec(statement_token).first()
+        
+        encrypted_access_token = encrypt_token(access_token)
+        
+        if existing_token:
+            print(f"Updating existing token for Store {store.id}")
+            existing_token.access_token_encrypted = encrypted_access_token
+            existing_token.token_type = token_type
+            existing_token.scope = scope
+            existing_token.user_id = tn_user_id 
+            session.add(existing_token)
+        else:
+            print(f"Creating new token for Store {store.id}")
+            new_token = TiendaNubeToken(
+                access_token_encrypted=encrypted_access_token,
+                token_type=token_type,
+                scope=token_data.get("scope"),
+                user_id=int(user_id),
+                store_id=store.id
+            )
+            session.add(new_token)
+        
+        session.commit()
+        
+        token_data["store_id"] = store.id
         return token_data
 
     @staticmethod
