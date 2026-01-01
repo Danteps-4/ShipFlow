@@ -186,9 +186,9 @@ async def process_pdf(
 # --- Tienda Nube Multi-Store Routes ---
 
 @app.get("/settings", response_class=HTMLResponse)
-async def view_settings(request: Request, session: Session = Depends(get_session)):
-    # List all stores for admin
-    stores = session.exec(select(Store).where(Store.user_id == 1)).all()
+async def view_settings(request: Request, current_user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    # List all stores for logged in user
+    stores = session.exec(select(Store).where(Store.user_id == current_user.id)).all()
     return templates.TemplateResponse("settings.html", {"request": request, "stores": stores})
 
 @app.get("/tracking", response_class=HTMLResponse)
@@ -231,10 +231,9 @@ async def set_active_store(data: dict):
     return response
 
 @app.get("/api/me/stores")
-async def get_my_stores(session: Session = Depends(get_session)):
+async def get_my_stores(current_user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     # Return list of stores for frontend selector
-    # Sprint 2: Hardcoded user_id=1
-    stores = session.exec(select(Store).where(Store.user_id == 1)).all()
+    stores = session.exec(select(Store).where(Store.user_id == current_user.id)).all()
     return [
         {"id": s.id, "name": s.name, "tiendanube_user_id": s.tiendanube_user_id}
         for s in stores
@@ -242,8 +241,8 @@ async def get_my_stores(session: Session = Depends(get_session)):
 
 
 @app.post("/api/update-tracking")
-async def update_tracking_codes(file: UploadFile = File(...), store_id: int = Depends(get_current_store_id)):
-    token_data = TiendaNubeAuth.get_valid_token(store_id)
+async def update_tracking_codes(file: UploadFile = File(...), store: Store = Depends(get_current_store)):
+    token_data = TiendaNubeAuth.get_valid_token(store.id)
     if not token_data:
         return JSONResponse(status_code=401, content={"error": "Not authenticated or no active store selected."})
     
@@ -280,10 +279,10 @@ async def api_list_orders_ready(
     q: str = None, 
     stage: str = None, 
     debug: bool = False,
-    store_id: int = Depends(get_current_store_id)
+    store: Store = Depends(get_current_store)
 ):
     try:
-        token_data = TiendaNubeAuth.get_valid_token(store_id)
+        token_data = TiendaNubeAuth.get_valid_token(store.id)
         if not token_data:
              return JSONResponse(status_code=401, content={
                  "ok": False,
