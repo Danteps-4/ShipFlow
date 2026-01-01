@@ -63,6 +63,9 @@ class Token(BaseModel):
 
 @app.post("/auth/register", response_model=Token)
 async def register(user_in: UserCreate, session: Session = Depends(get_session)):
+    if len(user_in.password) < 8 or len(user_in.password) > 256:
+        raise HTTPException(status_code=400, detail="Password must be between 8 and 256 characters")
+
     # Check if exists
     existing = session.exec(select(User).where(User.email == user_in.email)).first()
     if existing:
