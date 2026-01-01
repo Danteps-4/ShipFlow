@@ -26,7 +26,41 @@ class TiendaNubeAuth:
 
     @staticmethod
     def exchange_code_for_token(code):
-        # ... (validation code remains the same) ...
+        if not code:
+            raise ValueError("No code provided")
+            
+        url = "https://www.tiendanube.com/apps/authorize/token"
+        data = {
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": REDIRECT_URI
+        }
+        resp = requests.post(url, json=data)
+        
+        # Log status and partial body (avoid logging raw secrets if possible, but identifying error is key)
+        print(f"Token Exchange Status: {resp.status_code}")
+        try:
+            token_data = resp.json()
+        except:
+             print(f"Token Exchange Body (Raw): {resp.text}")
+             raise ValueError("Invalid JSON response from TiendaNube")
+
+        # Validate Critical Fields
+        access_token = token_data.get("access_token")
+        token_type = token_data.get("token_type")
+        user_id = token_data.get("user_id")
+        
+        if not access_token or not token_type or not user_id:
+             # Log partial details for debugging
+             safe_log = {k: v for k, v in token_data.items() if k != 'access_token'}
+             print(f"Token Exchange Failed Validation: {safe_log}")
+             raise ValueError(f"Missing critical fields in token response. Status={resp.status_code}")
+
+        if resp.status_code != 200:
+             # Even if fields exist, if status is bad, we shouldn't trust it, but usually successful response is 200
+             raise ValueError(f"Error exchanging code: {resp.text}")
 
         # If we reached here, data is valid
         print(f"Token Exchange Success. User ID (TN Store ID): {user_id}")
