@@ -14,7 +14,7 @@ CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 REDIRECT_URI = os.getenv("REDIRECT_URI")
 from sqlmodel import select
 from app.database import engine, get_session
-from app.models import TiendaNubeToken
+from app.models import TiendaNubeToken, Store
 
 from app.security import encrypt_token, decrypt_token
 
@@ -65,15 +65,40 @@ class TiendaNubeAuth:
              raise ValueError(f"Error exchanging code: {resp.text}")
 
         # If we reached here, data is valid
-        print(f"Token Exchange Success. User ID: {user_id}")
+        print(f"Token Exchange Success. User ID (TN Store ID): {user_id}")
+
+        store_id_internal = None
 
         # Save to DB
         with next(get_session()) as session:
+            # 1. Find or Create Store
+            statement_store = select(Store).where(Store.tiendanube_user_id == int(user_id))
+            store = session.exec(statement_store).first()
             
-            # Check existence
-            statement = select(TiendaNubeToken).where(TiendaNubeToken.user_id == user_id)
-            results = session.exec(statement)
-            existing_token = results.first()
+            if not store:
+                print(f"New Store detected for TN ID {user_id}. Creating...")
+                # Link to Admin User ID 1 for Sprint 2 (Multi-store private)
+                # In future we would get this from current_user
+                admin_user_id = 1 
+                
+                # Check if admin user exists, if not create dummy for safety if migration failed or seed didn't run?
+                # For now assume IT EXISTS or allow NULL if your model allows (it allows null user_id)
+                
+                store = Store(
+                    name=f"Tienda {user_id}",
+                    tiendanube_user_id=int(user_id),
+                    user_id=admin_user_id
+                )
+                session.add(store)
+                session.commit()
+                session.refresh(store)
+            
+            store_id_internal = store.id
+            
+            # 2. Update/Create Token linked to this Store
+            # Check existence by Store ID (preferred) or User ID
+            statement_token = select(TiendaNubeToken).where(TiendaNubeToken.store_id == store.id)
+            existing_token = session.exec(statement_token).first()
             
             encrypted_access_token = encrypt_token(access_token)
             
@@ -81,25 +106,36 @@ class TiendaNubeAuth:
                 existing_token.access_token_encrypted = encrypted_access_token
                 existing_token.token_type = token_type
                 existing_token.scope = token_data.get("scope")
+                existing_token.user_id = int(user_id) # Ensure consistency
                 session.add(existing_token)
             else:
                 new_token = TiendaNubeToken(
                     access_token_encrypted=encrypted_access_token,
                     token_type=token_type,
                     scope=token_data.get("scope"),
-                    user_id=user_id
+                    user_id=int(user_id),
+                    store_id=store.id
                 )
                 session.add(new_token)
             
             session.commit()
             
+        # Return merged data including our internal store_id
+        token_data["store_id"] = store_id_internal
         return token_data
 
     @staticmethod
-    def get_valid_token():
-        # Retrieve latest token, decrypted
+    def get_valid_token(store_id: int = None):
+        # Retrieve latest token for specific store
+        if not store_id:
+             # Fallback? Or fail? User requested explicit selector.
+             # Ideally we shouldn't guess, but for backwards compatibility...
+             return None 
+
         with next(get_session()) as session:
-            statement = select(TiendaNubeToken)
+            # Join with Store to be safe? Or just filter by store_id if Token has it.
+            # Token model has store_id.
+            statement = select(TiendaNubeToken).where(TiendaNubeToken.store_id == store_id)
             results = session.exec(statement)
             token_db = results.first()
             
@@ -117,7 +153,8 @@ class TiendaNubeAuth:
                 "access_token": decrypted,
                 "user_id": token_db.user_id,
                 "token_type": token_db.token_type,
-                "scope": token_db.scope
+                "scope": token_db.scope,
+                "store_id": token_db.store_id
             }
 
 class TiendaNubeClient:

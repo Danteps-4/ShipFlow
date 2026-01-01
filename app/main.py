@@ -17,8 +17,12 @@ from app.services.data_processing import AndreaniProcessor
 from app.services.pdf_processing import process_pdf_labels, construir_mapa_skus
 from app.services.tiendanube import TiendaNubeAuth, TiendaNubeClient
 from app.services.csv_generator import TiendaNubeCSVGenerator
-from app.database import init_db
-from fastapi.responses import RedirectResponse
+from app.database import init_db, get_session
+from app.dependencies import get_current_store_id, get_current_store
+from app.models import Store
+from sqlmodel import select, Session
+
+from fastapi.responses import RedirectResponse, Response
 
 app = FastAPI(title="Andreani Automation Web App")
 
@@ -31,23 +35,25 @@ templates = Jinja2Templates(directory="app/templates")
 # Config paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ANDREANI_TEMPLATE = os.path.join(BASE_DIR, "EnvioMasivoExcelPaquetes.xlsx")
-# Output configs - These might need to be temp dirs in production!
-# For Render, writable disk is ephemeral usually, but okay for tmp files.
+# Output configs
 OUTPUT_EXCEL = "/tmp/EnvioMasivoExcelPaquetes_cargado.xlsx"
 OUTPUT_PDF = "/tmp/documentos_combinados_con_sku.pdf"
 
-# Ensure /tmp exists on Windows (locally)
 if os.name == 'nt':
     OUTPUT_EXCEL = os.path.join(BASE_DIR, "temp_output_excel.xlsx")
     OUTPUT_PDF = os.path.join(BASE_DIR, "temp_output_pdf.pdf")
 
-# Data Processor Instance
-# Singleton is fine
 processor = AndreaniProcessor(ANDREANI_TEMPLATE)
 
 @app.on_event("startup")
 def on_startup():
     init_db()
+
+# --- Common Context ---
+# We can inject 'stores' list into templates globally or per request
+def get_user_stores(session: Session = next(get_session())):
+    # Quick helper for admin user 1 (Sprint 2 assumption)
+    return session.exec(select(Store).where(Store.user_id == 1)).all()
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
@@ -76,7 +82,6 @@ async def parse_csv(file: UploadFile = File(...)):
 
 @app.post("/api/generate-excel")
 async def generate_excel(data: dict):
-    # data expects {"records": [...]}
     records = data.get("records", [])
     if not records:
         return JSONResponse(status_code=400, content={"error": "No records provided"})
@@ -103,7 +108,6 @@ async def process_pdf(
         skus_map = construir_mapa_skus(csv_bytes)
         modified_pdf = process_pdf_labels(pdf_bytes, skus_map)
         
-        # Save temporarily
         with open(OUTPUT_PDF, "wb") as f:
             f.write(modified_pdf)
             
@@ -112,15 +116,22 @@ async def process_pdf(
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
-# --- Tienda Nube Routes ---
+# --- Tienda Nube Multi-Store Routes ---
+
+@app.get("/settings", response_class=HTMLResponse)
+async def view_settings(request: Request, session: Session = Depends(get_session)):
+    # List all stores for admin
+    stores = session.exec(select(Store).where(Store.user_id == 1)).all()
+    return templates.TemplateResponse("settings.html", {"request": request, "stores": stores})
 
 @app.get("/tracking", response_class=HTMLResponse)
-async def view_tracking_process(request: Request):
-    token_data = TiendaNubeAuth.get_valid_token()
+async def view_tracking_process(request: Request, store_id: int = Depends(get_current_store_id)):
+    token_data = TiendaNubeAuth.get_valid_token(store_id)
     is_authenticated = token_data is not None
     return templates.TemplateResponse("tracking_process.html", {
         "request": request,
-        "is_authenticated": is_authenticated
+        "is_authenticated": is_authenticated,
+        "active_store_id": store_id
     })
 
 @app.get("/tiendanube/login")
@@ -132,50 +143,84 @@ async def tiendanube_login():
 async def tiendanube_callback(request: Request, code: str):
     print(f"CALLBACK HIT {request.url} code={code}")
     try:
-        TiendaNubeAuth.exchange_code_for_token(code)
-        return RedirectResponse(url="/tracking")
+        # Exchange returns dict with "store_id"
+        token_data_full = TiendaNubeAuth.exchange_code_for_token(code)
+        store_id = token_data_full.get("store_id")
+        
+        # Set cookie and redirect
+        response = RedirectResponse(url="/settings") # Go to settings to verify connection
+        response.set_cookie(key="andreani_active_store", value=str(store_id))
+        return response
     except Exception as e:
         print(f"Callback Error: {e}")
         return JSONResponse(status_code=400, content={"error": f"Auth failed: {str(e)}"})
 
+# Endpoint to switch active store manually
+@app.post("/api/set-active-store")
+async def set_active_store(data: dict):
+    store_id = data.get("store_id")
+    response = JSONResponse({"ok": True, "store_id": store_id})
+    response.set_cookie(key="andreani_active_store", value=str(store_id))
+    return response
+
+@app.get("/api/me/stores")
+async def get_my_stores(session: Session = Depends(get_session)):
+    # Return list of stores for frontend selector
+    # Sprint 2: Hardcoded user_id=1
+    stores = session.exec(select(Store).where(Store.user_id == 1)).all()
+    return [
+        {"id": s.id, "name": s.name, "tiendanube_user_id": s.tiendanube_user_id}
+        for s in stores
+    ]
+
+
 @app.post("/api/update-tracking")
-async def update_tracking_codes(file: UploadFile = File(...)):
-    token_data = TiendaNubeAuth.get_valid_token()
+async def update_tracking_codes(file: UploadFile = File(...), store_id: int = Depends(get_current_store_id)):
+    token_data = TiendaNubeAuth.get_valid_token(store_id)
     if not token_data:
-        return JSONResponse(status_code=401, content={"error": "Not authenticated. Please login first."})
+        return JSONResponse(status_code=401, content={"error": "Not authenticated or no active store selected."})
     
     try:
         content = await file.read()
         
-        store_id = token_data.get("user_id")
+        store_id_tn = token_data.get("user_id") # TN Store ID
         access_token = token_data.get("access_token")
         
         if not access_token:
             raise RuntimeError("Missing access_token")
         
-        client = TiendaNubeClient(store_id=store_id, access_token=access_token)
+        client = TiendaNubeClient(store_id=store_id_tn, access_token=access_token)
         result = client.process_tracking_file(content)
         return result
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.get("/orders-ready", response_class=HTMLResponse)
-async def view_orders_ready(request: Request):
-    token_data = TiendaNubeAuth.get_valid_token()
+async def view_orders_ready(request: Request, store_id: int = Depends(get_current_store_id)):
+    token_data = TiendaNubeAuth.get_valid_token(store_id)
     if not token_data:
-        return RedirectResponse("/tiendanube/login")
-    return templates.TemplateResponse("orders_ready.html", {"request": request})
+        # If no store active, maybe redirect to settings to select one?
+        return RedirectResponse("/settings")
+    return templates.TemplateResponse("orders_ready.html", {
+        "request": request,
+        "active_store_id": store_id
+    })
 
 @app.get("/api/orders/ready")
-async def api_list_orders_ready(page: int = 1, per_page: int = 20, q: str = None, stage: str = None, debug: bool = False):
+async def api_list_orders_ready(
+    page: int = 1, 
+    per_page: int = 20, 
+    q: str = None, 
+    stage: str = None, 
+    debug: bool = False,
+    store_id: int = Depends(get_current_store_id)
+):
     try:
-        token_data = TiendaNubeAuth.get_valid_token()
-        if not token_data or not token_data.get("access_token"):
-             logger_error_msg = "Re-connect the app (missing access_token)"
-             print(f"ERROR: {logger_error_msg}")
+        token_data = TiendaNubeAuth.get_valid_token(store_id)
+        if not token_data:
              return JSONResponse(status_code=401, content={
                  "ok": False,
-                 "error": logger_error_msg
+                 "error": "No active store or not authenticated"
              })
         
         client = TiendaNubeClient(token_data.get("user_id"), token_data.get("access_token"))
@@ -189,19 +234,18 @@ async def api_list_orders_ready(page: int = 1, per_page: int = 20, q: str = None
         }
 
     except Exception as e:
-        err_str = str(e)
         tb_str = traceback.format_exc()
         print(f"CRITICAL ERROR in /orders/ready:\n{tb_str}")
         return JSONResponse(status_code=500, content={
             "ok": False, 
-            "error": err_str,
+            "error": str(e),
             "traceback": tb_str
         })
 
 @app.get("/api/orders/stats")
-async def api_orders_stats():
-    token_data = TiendaNubeAuth.get_valid_token()
-    if not token_data or not token_data.get("access_token"):
+async def api_orders_stats(store_id: int = Depends(get_current_store_id)):
+    token_data = TiendaNubeAuth.get_valid_token(store_id)
+    if not token_data:
         return {"ok": False, "stats": {"unpacked": 0, "packed": 0}}
         
     try:
@@ -214,13 +258,13 @@ async def api_orders_stats():
 
 
 @app.post("/andreani/csv")
-async def generate_andreani_csv_route(data: dict):
+async def generate_andreani_csv_route(data: dict, store_id: int = Depends(get_current_store_id)):
     nums = data.get("order_numbers", [])
     if not nums:
         return JSONResponse(status_code=400, content={"error": "No orders selected"})
     
-    token_data = TiendaNubeAuth.get_valid_token()
-    if not token_data or not token_data.get("access_token"):
+    token_data = TiendaNubeAuth.get_valid_token(store_id)
+    if not token_data:
          return JSONResponse(status_code=401, content={"error": "Not authenticated"})
     
     try:
@@ -257,13 +301,13 @@ async def generate_andreani_csv_route(data: dict):
 BATCH_STORE = {}
 
 @app.post("/api/orders/process-batch")
-async def process_batch_route(data: dict):
+async def process_batch_route(data: dict, store_id: int = Depends(get_current_store_id)):
     nums = data.get("order_numbers", [])
     if not nums:
         return JSONResponse(status_code=400, content={"error": "No orders selected"})
     
-    token_data = TiendaNubeAuth.get_valid_token()
-    if not token_data or not token_data.get("access_token"):
+    token_data = TiendaNubeAuth.get_valid_token(store_id)
+    if not token_data:
          return JSONResponse(status_code=401, content={"error": "Not authenticated"})
     
     try:
@@ -286,7 +330,6 @@ async def process_batch_route(data: dict):
 
         csv_bytes = TiendaNubeCSVGenerator.generate(full_orders)
         
-        # Processor used here
         results = processor.process_csv(csv_bytes)
         
         if isinstance(results, dict) and "error" in results:

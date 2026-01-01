@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Configuración de Tiendas</h2>
+
+    <div class="card mb-4">
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">Mis Tiendas Conectadas</h5>
+            <a href="/tiendanube/login" class="btn btn-light btn-sm">
+                <i class="bi bi-plus-circle"></i> Conectar Nueva Tienda
+            </a>
+        </div>
+        <div class="card-body">
+            {% if stores %}
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>ID (#)</th>
+                            <th>Nombre</th>
+                            <th>Tienda Nube ID</th>
+                            <th>Estado</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for store in stores %}
+                        <tr>
+                            <td>{{ store.id }}</td>
+                            <td>{{ store.name }}</td>
+                            <td>{{ store.tiendanube_user_id }}</td>
+                            <td>
+                                <span class="badge bg-success">Conectado</span>
+                            </td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-primary btn-set-active"
+                                    data-store-id="{{ store.id }}">
+                                    Usar esta tienda
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="alert alert-info">
+                No tienes tiendas conectadas aún. Haz clic en "Conectar Nueva Tienda" para comenzar.
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const buttons = document.querySelectorAll('.btn-set-active');
+        buttons.forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const storeId = btn.getAttribute('data-store-id');
+                await setActiveStore(storeId);
+            });
+        });
+    });
+
+    async function setActiveStore(storeId) {
+        try {
+            const resp = await fetch('/api/set-active-store', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ store_id: parseInt(storeId) })
+            });
+            const data = await resp.json();
+            if (data.ok) {
+                window.location.reload();
+            } else {
+                alert("Error cambiando tienda");
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Error de conexión");
+        }
+    }
+</script>
+{% endblock %}
