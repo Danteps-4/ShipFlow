@@ -206,6 +206,12 @@ async def tiendanube_connect(current_user: User = Depends(get_current_user), ses
     auth_url = TiendaNubeAuth.get_auth_url(current_user.id, session)
     return RedirectResponse(auth_url)
 
+@app.get("/tiendanube/connect-url")
+async def tiendanube_connect_url(current_user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    """Returns the authorization URL for JSON clients (SPA)"""
+    auth_url = TiendaNubeAuth.get_auth_url(current_user.id, session)
+    return {"url": auth_url}
+
 @app.get("/tiendanube/callback")
 async def tiendanube_callback(request: Request, code: str, state: str, session: Session = Depends(get_session)):
     print(f"CALLBACK HIT {request.url} code={code} state={state}")
@@ -213,9 +219,23 @@ async def tiendanube_callback(request: Request, code: str, state: str, session: 
         # Process Callback (validates state, links user, returns store info)
         token_data_full = TiendaNubeAuth.process_callback(code, state, session)
         store_id = token_data_full.get("store_id")
+        internal_user_id = token_data_full.get("internal_user_id")
         
-        # Set cookie and redirect
-        response = RedirectResponse(url="/settings") # Go to settings
+        # Determine redirection URL (Cookie based auth for browser)
+        response = RedirectResponse(url="/settings")
+        
+        # Generate Session Token for Browser (logs them in / keeps them in)
+        if internal_user_id:
+             user = session.get(User, internal_user_id)
+             if user:
+                 access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+                 access_token = create_access_token(
+                     data={"sub": user.email}, expires_delta=access_token_expires
+                 )
+                 # Set HttpOnly cookie for security
+                 response.set_cookie(key="access_token", value=access_token, httponly=True)
+
+        # Set active store cookie
         response.set_cookie(key="andreani_active_store", value=str(store_id))
         return response
     except Exception as e:

@@ -139,6 +139,7 @@ class TiendaNubeAuth:
         session.commit()
         
         token_data["store_id"] = store.id
+        token_data["internal_user_id"] = user_id
         return token_data
 
     @staticmethod

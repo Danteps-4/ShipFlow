@@ -6,24 +6,21 @@ from app.models import Store, TiendaNubeToken, User
 from app.security import SECRET_KEY, ALGORITHM, jwt, JWTError
 from typing import Optional
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token", auto_error=False)
 
-def get_current_user_optional(token: str = Depends(oauth2_scheme), session: Session = Depends(get_session)) -> Optional[User]:
-    # Allow loose auth for initial setup if needed, but strict is better.
-    # Actually, we'll implement strict `get_current_user`
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
-            return None
-    except JWTError:
-        return None
-        
-    statement = select(User).where(User.email == email)
-    user = session.exec(statement).first()
-    return user
+def get_token(request: Request, token_header: Optional[str] = Depends(oauth2_scheme)):
+    if token_header:
+        return token_header
+    cookie_token = request.cookies.get("access_token")
+    if cookie_token:
+        return cookie_token
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Not authenticated",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
-async def get_current_user(token: str = Depends(oauth2_scheme), session: Session = Depends(get_session)) -> User:
+async def get_current_user(token: str = Depends(get_token), session: Session = Depends(get_session)) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
