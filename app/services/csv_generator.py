@@ -62,7 +62,7 @@ class TiendaNubeCSVGenerator:
         
         status_map = {"open": "Abierta", "closed": "Cerrada", "cancelled": "Cancelada"}
         pay_map = {"paid": "Recibido", "pending": "Pendiente", "voided": "Cancelado"}
-        ship_map = {"unshipped": "Listo para enviar", "shipped": "Enviado"}
+        ship_map = {"unshipped": "Listo para enviar", "shipped": "Enviado", "unpacked": "Listo para enviar"}
         
         for order in orders:
             # Common Order Fields
