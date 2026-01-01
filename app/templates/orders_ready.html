@@ -186,7 +186,7 @@
         debugPanel.style.display = debugMode ? 'block' : 'none';
 
         try {
-            const params = new URLSearchParams({ page: currPage, per_page: 20, stage: currStage });
+            const params = new URLSearchParams({ page: currPage, per_page: 50, stage: currStage });
             if (q) params.append('q', q);
             if (debugMode) params.append('debug', 'true');
 
