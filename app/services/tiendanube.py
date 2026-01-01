@@ -12,10 +12,17 @@ load_dotenv()
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 REDIRECT_URI = os.getenv("REDIRECT_URI")
-from sqlmodel import select
+from app.database import engine, get_session
 from app.models import TiendaNubeToken, Store, User
+from app.security import encrypt_token, decrypt_token
 
-# ... imports ...
+class TiendaNubeAuth:
+    @staticmethod
+    def get_auth_url():
+        return (
+            f"https://www.tiendanube.com/apps/{CLIENT_ID}/authorize?"
+            f"response_type=code&scope=read_orders%20write_orders%20write_products&redirect_uri={REDIRECT_URI}"
+        )
 
     @staticmethod
     def exchange_code_for_token(code):
