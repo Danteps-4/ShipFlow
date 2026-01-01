@@ -41,7 +41,7 @@ class TiendaNubeAuth:
         }
         resp = requests.post(url, json=data)
         
-        # Log status and partial body (avoid logging raw secrets if possible, but identifying error is key)
+        # Log status and partial body (avoid logging raw secrets if possible, but identifying error is key))
         print(f"Token Exchange Status: {resp.status_code}")
         try:
             token_data = resp.json()
