@@ -105,19 +105,22 @@ class TiendaNubeAuth:
             
             # 2. Update/Create Token linked to this Store
             # ... (rest remains same) ...
-            # Check existence by Store ID (preferred) or User ID
+            # 2. Update/Create Token linked to this Store
+            # Check existence by Store ID (Unique Constraint)
             statement_token = select(TiendaNubeToken).where(TiendaNubeToken.store_id == store.id)
             existing_token = session.exec(statement_token).first()
             
             encrypted_access_token = encrypt_token(access_token)
             
             if existing_token:
+                print(f"Updating existing token for Store {store.id}")
                 existing_token.access_token_encrypted = encrypted_access_token
                 existing_token.token_type = token_type
                 existing_token.scope = token_data.get("scope")
-                existing_token.user_id = int(user_id) # Ensure consistency
+                existing_token.user_id = int(user_id) 
                 session.add(existing_token)
             else:
+                print(f"Creating new token for Store {store.id}")
                 new_token = TiendaNubeToken(
                     access_token_encrypted=encrypted_access_token,
                     token_type=token_type,

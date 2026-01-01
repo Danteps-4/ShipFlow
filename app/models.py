@@ -26,8 +26,8 @@ class TiendaNubeToken(SQLModel, table=True):
     access_token_encrypted: str # New encrypted field
     token_type: str
     scope: str
-    user_id: int = Field(unique=True) # Tienda Nube user_id (redundant but kept for easy lookup if Store not linked yet)
-    store_id: Optional[int] = Field(default=None, foreign_key="store.id")
+    user_id: int = Field(unique=False) # Tienda Nube user_id (Not unique, allows re-connection history or duplicates if needed)
+    store_id: Optional[int] = Field(default=None, foreign_key="store.id", unique=True) # One token per store
     created_at: datetime = Field(default_factory=datetime.utcnow)
     
     store: Optional[Store] = Relationship(back_populates="token")
