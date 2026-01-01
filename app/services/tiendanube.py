@@ -234,7 +234,7 @@ class TiendaNubeClient:
         r = self._req("PATCH", endpoint, json=payload)
         return endpoint, r.status_code, r.text
 
-    def list_orders_ready(self, page: int = 1, per_page: int = 20, q: str = None, payment_statuses: list = None, stage: str = None, debug: bool = False) -> dict:
+    def list_orders_ready(self, page: int = 1, per_page: int = 50, q: str = None, payment_statuses: list = None, stage: str = None, debug: bool = False) -> dict:
         url = f"{self.base}/orders"
         params = {
             "page": page,

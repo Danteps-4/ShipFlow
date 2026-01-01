@@ -209,7 +209,7 @@ async def view_orders_ready(request: Request, store_id: int = Depends(get_curren
 @app.get("/api/orders/ready")
 async def api_list_orders_ready(
     page: int = 1, 
-    per_page: int = 20, 
+    per_page: int = 50, 
     q: str = None, 
     stage: str = None, 
     debug: bool = False,

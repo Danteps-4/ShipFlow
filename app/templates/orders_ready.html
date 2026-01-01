@@ -57,7 +57,11 @@
                 <span>Modo Debug</span>
             </label>
 
-            <div style="display:flex; gap:0.5rem">
+            <div style="display:flex; gap:0.5rem; align-items: center;">
+                <span id="selectionCount"
+                    style="font-weight: 600; color: var(--primary-color); display: none; margin-right: 10px;">
+                    0 seleccionados
+                </span>
                 <!-- Secondary Download Button -->
                 <button class="btn btn-secondary" onclick="generateCsv()" title="Descargar CSV para uso manual">
                     <i class="fas fa-download"></i> Descargar CSV
@@ -327,8 +331,95 @@
         });
     }
 
+    function renderTable(orders) {
+        const tbody = document.getElementById('ordersTableBody');
+        tbody.innerHTML = '';
+        updateSelectionCount(); // Reset count visual on render
+
+        if (orders.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" style="padding: 2rem; text-align: center;">No hay pedidos en esta vista.</td></tr>';
+            return;
+        }
+
+        orders.forEach(o => {
+            const tr = document.createElement('tr');
+            tr.style.borderBottom = "1px solid var(--border-color)";
+
+            // Validation logic for visual cues
+            const missingZip = !o.zipcode;
+            if (missingZip) tr.style.backgroundColor = "rgba(239, 68, 68, 0.1)"; // Dark mode warning
+
+            // Render Products List
+            let productsHtml = '';
+            if (o.products && o.products.length > 0) {
+                productsHtml = `<ul style="list-style: none; padding: 0; margin: 0; font-size: 0.9rem;">`;
+                o.products.forEach(p => {
+                    productsHtml += `<li style="margin-bottom: 4px;">
+                        <span style="font-weight: 600; color: var(--text-color);">${p.quantity}x</span> 
+                        <span style="color: var(--text-color);">${p.name}</span>
+                        <div style="font-size: 0.75rem; color: var(--text-muted); padding-left: 1.2rem;">SKU: ${p.sku || '-'}</div>
+                    </li>`;
+                });
+                productsHtml += `</ul>`;
+            } else {
+                productsHtml = '<span style="color: var(--text-muted); font-style: italic;">Sin productos</span>';
+            }
+
+            const paymentBadgeStyle = o.payment_status === 'paid'
+                ? 'background: rgba(16, 185, 129, 0.2); color: var(--success-color);'
+                : 'background: rgba(245, 158, 11, 0.2); color: var(--warning-color);';
+
+            tr.innerHTML = `
+                <td style="padding: 1rem; vertical-align: top;"><input type="checkbox" class="order-check" value="${o.number}"></td>
+                <td style="padding: 1rem; vertical-align: top; font-weight: 600;">${o.number}</td>
+                <td style="padding: 1rem; vertical-align: top;">
+                    ${o.customer_name || '-'}
+                </td>
+                <td style="padding: 1rem; vertical-align: top;">
+                    ${productsHtml}
+                </td>
+                <td style="padding: 1rem; vertical-align: top;">
+                    <div style="font-size: 0.9rem;">${o.address || '-'}</div>
+                    <div style="font-size: 0.8rem; color: var(--text-muted);">${o.city || ''}</div>
+                </td>
+                <td style="padding: 1rem; vertical-align: top;">
+                    ${missingZip ? '<span style="color:var(--error-color); font-weight:bold;">FALTA CP</span>' : o.zipcode}
+                </td>
+                <td style="padding: 1rem; vertical-align: top; white-space: nowrap;">
+                    ${new Date(o.created_at).toLocaleDateString()}
+                </td>
+                <td style="padding: 1rem; vertical-align: top; font-size: 0.85rem;">
+                    <span style="display: inline-block; padding: 2px 6px; border-radius: 4px; ${paymentBadgeStyle} margin-bottom: 2px;">
+                        ${o.payment_status}
+                    </span><br>
+                    <span style="color: var(--text-muted);">${o.shipping_option || '-'}</span>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    // Event delegation for checkbox changes
+    document.getElementById('ordersTableBody').addEventListener('change', function (e) {
+        if (e.target.classList.contains('order-check')) {
+            updateSelectionCount();
+        }
+    });
+
+    function updateSelectionCount() {
+        const count = document.querySelectorAll('.order-check:checked').length;
+        const span = document.getElementById('selectionCount');
+        if (count > 0) {
+            span.style.display = 'inline-block';
+            span.innerText = `${count} seleccionado${count !== 1 ? 's' : ''}`;
+        } else {
+            span.style.display = 'none';
+        }
+    }
+
     function toggleAll(source) {
         document.querySelectorAll('.order-check').forEach(c => c.checked = source.checked);
+        updateSelectionCount();
     }
 
     async function processBatch() {
