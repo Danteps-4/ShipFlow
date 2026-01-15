@@ -49,6 +49,17 @@ document.addEventListener('DOMContentLoaded', () => {
         filePreview.classList.remove('hidden');
     }
 
+    // --- Backend Logic ---
+    async function safeJson(response) {
+        const text = await response.text();
+        try {
+            return text ? JSON.parse(text) : {};
+        } catch (e) {
+            console.error("JSON PARSE ERROR. Body:", text);
+            throw new Error(`Respuesta inválida del servidor: ${text.substring(0, 100)}...`);
+        }
+    }
+
     // --- Processing ---
     btnProcess.addEventListener('click', async (e) => {
         e.stopPropagation(); // Prevent dropZone click
@@ -63,7 +74,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const formData = new FormData();
         formData.append('file', selectedFile);
 
-        let globalStats = { success: 0, errors: 0, skipped: 0, total: 0, processed_count: 0 };
+        let globalStats = { success: 0, errors: 0, processed_count: 0, total: 0 };
 
         try {
             // Step 1: Upload
@@ -73,16 +84,11 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             if (!responseUpload.ok) {
-                const text = await responseUpload.text();
-                let errMsg = text;
-                try {
-                    const json = JSON.parse(text);
-                    errMsg = json.error || text;
-                } catch (e) { }
-                throw new Error(`Upload Failed: ${errMsg}`);
+                const errData = await safeJson(responseUpload);
+                throw new Error(errData.error || `Upload failed with status ${responseUpload.status}`);
             }
 
-            const uploadData = await responseUpload.json();
+            const uploadData = await safeJson(responseUpload);
             const batchId = uploadData.batch_id;
             const totalExpected = uploadData.total;
             globalStats.total = totalExpected;
@@ -92,31 +98,38 @@ document.addEventListener('DOMContentLoaded', () => {
             let completed = false;
 
             while (!completed) {
-                const resBatch = await fetch(`/api/tracking/batch/${batchId}?limit=10`, {
+                // Request next chunk
+                const resBatch = await fetch(`/api/tracking/batch/${batchId}?limit=5`, {
                     method: 'POST'
                 });
 
                 if (!resBatch.ok) {
-                    // Try to read error
-                    const text = await resBatch.text();
-                    console.error("Batch Error:", text);
-                    // We can try to continue or abort? Abort for now
-                    throw new Error(`Batch Processing Failed: ${text}`);
+                    const errData = await safeJson(resBatch);
+                    throw new Error(errData.detail || errData.error || `Batch error status ${resBatch.status}`);
                 }
 
-                let batchData;
-                try {
-                    batchData = await resBatch.json();
-                } catch (e) {
-                    throw new Error("Invalid JSON from server (possible timeout/crash)");
+                const batchData = await safeJson(resBatch);
+
+                // Update Stats based on response
+                // Response Format: { sent, failed, remaining, items: [...] }
+                const items = batchData.items || [];
+
+                if (items.length > 0) {
+                    appendResults(items, globalStats);
                 }
 
-                if (batchData.results && batchData.results.length > 0) {
-                    appendResults(batchData.results, globalStats);
-                }
-
-                if (batchData.completed) {
+                // Check termination condition
+                // If remaining is 0, we assume done. Or checking if we received items.
+                // Or simply checking if remaining is 0.
+                if (batchData.remaining === 0) {
                     completed = true;
+                }
+
+                // Safety break if we get 0 items but remaining > 0 (stuck)
+                if (items.length === 0 && batchData.remaining > 0) {
+                    console.warn("Stuck batch? 0 items returned but remaining > 0");
+                    // Optional wait or break
+                    await new Promise(r => setTimeout(r, 2000));
                 }
             }
 
@@ -131,25 +144,27 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    function appendResults(results, stats) {
-        results.forEach(r => {
-            if (r.status === 'SUCCESS') stats.success++;
-            else if (r.status === 'SKIPPED') stats.skipped++;
-            else stats.errors++;
-
+    function appendResults(items, stats) {
+        items.forEach(r => {
+            if (r.ok) {
+                stats.success++;
+            } else {
+                stats.errors++;
+            }
             stats.processed_count++;
 
             const row = document.createElement('tr');
 
             let statusBadge = '';
-            if (r.status === 'SUCCESS') statusBadge = '<span class="badge success">OK</span>';
-            else if (r.status === 'SKIPPED') statusBadge = '<span class="badge warning">OMITIDO</span>';
+            if (r.ok) statusBadge = '<span class="badge success">OK</span>';
             else statusBadge = '<span class="badge error">ERROR</span>';
 
+            const reason = r.error || r.reason || '';
+
             row.innerHTML = `
-                <td>${r.order}</td>
+                <td>${r.order_id || r.order}</td>
                 <td>${statusBadge}</td>
-                <td>${r.reason || r.details || ''}</td>
+                <td>${reason}</td>
             `;
             resultsTable.appendChild(row);
         });
@@ -158,14 +173,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateStatsDisplay(stats) {
+        // Safe division
+        let progress = 0;
+        if (stats.total > 0) {
+            progress = Math.round((stats.processed_count / stats.total) * 100);
+        }
+
         statsDiv.innerHTML = `
             <div class="stat-card">
-                <h3>${stats.processed_count} / ${stats.total}</h3>
+                <h3>${stats.processed_count} / ${stats.total} (${progress}%)</h3>
                 <p>Procesados</p>
             </div>
             <div class="stat-card success">
                 <h3>${stats.success}</h3>
-                <p>Actualizados</p>
+                <p>Enviados</p>
             </div>
              <div class="stat-card error">
                 <h3>${stats.errors}</h3>

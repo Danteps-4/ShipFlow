@@ -184,7 +184,9 @@ class TiendaNubeClient:
         }
 
     def _req(self, method: str, url: str, **kwargs):
-        r = requests.request(method, url, headers=self.headers, timeout=30, **kwargs)
+        # Timeout tuple: (connect_timeout, read_timeout)
+        timeout = kwargs.pop('timeout', (5, 30))
+        r = requests.request(method, url, headers=self.headers, timeout=timeout, **kwargs)
         return r
 
     def lookup_real_order_id(self, order_number: int) -> int:

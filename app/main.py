@@ -243,7 +243,12 @@ async def process_tracking_batch(batch_id: str, limit: int = 20):
         total = batch["total"]
         
         if processed_count >= total:
-            return {"ok": True, "completed": True, "results": []}
+            return {
+                "sent": 0,
+                "failed": 0,
+                "remaining": 0,
+                "items": []
+            }
             
         # Get chunk
         chunk = items[processed_count : processed_count + limit]
@@ -256,20 +261,37 @@ async def process_tracking_batch(batch_id: str, limit: int = 20):
         client = TiendaNubeClient(store_id=token_data["user_id"], access_token=token_data["access_token"])
         
         chunk_results = []
+        sent_in_batch = 0
+        failed_in_batch = 0
+        
         for item in chunk:
             res = client.process_single_tracking_item(item)
-            chunk_results.append(res)
+            # Normalize result for response
+            is_ok = (res.get("status") == "SUCCESS")
+            
+            if is_ok:
+                sent_in_batch += 1
+            else:
+                failed_in_batch += 1
+                
+            chunk_results.append({
+                "order_id": res.get("order"),
+                "ok": is_ok,
+                "error": res.get("details") if not is_ok else None,
+                # Legacy fields for frontend compatibility if needed
+                "status": res.get("status"), 
+                "reason": res.get("details")
+            })
             
         # Update State
         batch["results"].extend(chunk_results)
         batch["processed"] += len(chunk)
         
         return {
-            "ok": True,
-            "completed": batch["processed"] >= total,
-            "processed": batch["processed"],
-            "total": total,
-            "results": chunk_results
+            "sent": sent_in_batch,
+            "failed": failed_in_batch,
+            "remaining": total - batch["processed"],
+            "items": chunk_results
         }
     except Exception as e:
         traceback.print_exc()

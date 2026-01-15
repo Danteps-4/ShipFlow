@@ -1,1 +1,1 @@
-web: gunicorn -k uvicorn.workers.UvicornWorker --timeout 180 --graceful-timeout 30 app.main:app
+web: gunicorn -k uvicorn.workers.UvicornWorker --timeout 300 --graceful-timeout 60 app.main:app
