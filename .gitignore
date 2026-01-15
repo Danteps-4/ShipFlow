@@ -1,0 +1,3 @@
+local_dev.db
+*.db
+__pycache__/

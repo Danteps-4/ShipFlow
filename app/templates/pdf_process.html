@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h2>Etiquetado con SKU (PDF)</h2>
+    <p class="text-muted">Sube el PDF de etiquetas descargado de Andreani Y el archivo CSV de ventas.</p>
+
+    <form id="pdf-form">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
+            <div>
+                <h4>1. Archivo PDF (Etiquetas)</h4>
+                <div class="drop-zone" id="drop-zone-pdf">
+                    <div id="upload-content-pdf">
+                        <i class="fas fa-file-pdf fa-3x" style="color: var(--error-color); margin-bottom: 1rem;"></i>
+                        <p>Arrastra el PDF aquí</p>
+                    </div>
+                    <input type="file" id="file-input-pdf" accept=".pdf" class="hidden" name="pdf_file">
+
+                    <!-- Preview -->
+                    <div id="file-preview-pdf" class="hidden">
+                        <div class="file-card">
+                            <i class="fas fa-file-pdf" style="font-size: 2rem; color: var(--error-color);"></i>
+                            <span id="file-name-pdf" style="margin: 0 1rem; font-weight: 600;">label.pdf</span>
+                        </div>
+                        <button type="button" id="btn-remove-pdf" class="btn-remove-file-absolute"
+                            title="Quitar archivo">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <h4>2. Archivo CSV (Ventas)</h4>
+                <div class="drop-zone" id="drop-zone-csv-ref">
+                    <div id="upload-content-csv">
+                        <i class="fas fa-file-csv fa-3x" style="color: var(--success-color); margin-bottom: 1rem;"></i>
+                        <p>Arrastra el CSV aquí</p>
+                    </div>
+                    <input type="file" id="file-input-csv-ref" accept=".csv" class="hidden" name="csv_file">
+
+                    <!-- Preview -->
+                    <div id="file-preview-csv" class="hidden">
+                        <div class="file-card">
+                            <i class="fas fa-file-csv" style="font-size: 2rem; color: var(--success-color);"></i>
+                            <span id="file-name-csv" style="margin: 0 1rem; font-weight: 600;">sales.csv</span>
+                        </div>
+                        <button type="button" id="btn-remove-csv" class="btn-remove-file-absolute"
+                            title="Quitar archivo">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 2rem;">
+            <button type="submit" id="btn-process-pdf" class="btn" disabled>
+                <i class="fas fa-cogs" style="margin-right: 0.5rem;"></i> Procesar PDF
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/pdf_process.js?v=2"></script>
+{% endblock %}

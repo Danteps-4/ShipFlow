@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Andreani Automatización{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/styles.css?v=3">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <!-- TomSelect for Searchable Dropdowns -->
+    <link href="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/css/tom-select.bootstrap5.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/js/tom-select.complete.min.js"></script>
+</head>
+
+<body>
+    <!-- Header with Toggle and Centered Brand -->
+    <header>
+        <button id="menuToggle" class="menu-toggle">
+            <i class="fas fa-bars"></i>
+        </button>
+
+        <a href="/" class="brand-center">
+            <i class="fas fa-rocket"></i>
+            ShipFlow
+        </a>
+
+        <div style="position: absolute; right: 20px; display: flex; align-items: center; gap: 10px;">
+            <select id="globalStoreSelect" style="display:none; padding: 5px; border-radius: 5px; border: none;">
+                <option value="" disabled selected>Tienda...</option>
+            </select>
+            <a href="/settings" style="color: white; font-size: 1.2rem;" title="Configuración">
+                <i class="fas fa-cog"></i>
+            </a>
+        </div>
+    </header>
+
+    <!-- Sidebar Drawer -->
+    <div id="sidebar" class="sidebar">
+        <div class="sidebar-header">
+            <h3 style="color: var(--primary-color); margin: 0;">Menú</h3>
+            <button id="menuClose" class="close-btn"><i class="fas fa-times"></i></button>
+        </div>
+        <nav class="sidebar-nav">
+            <a href="/" class="{% if request.url.path == '/' %}active{% endif %}">
+                <i class="fas fa-home"></i> Inicio
+            </a>
+            <a href="/orders-ready" class="{% if request.url.path == '/orders-ready' %}active{% endif %}">
+                <i class="fas fa-list-check"></i> Pedidos Listos
+            </a>
+            <a href="/excel" class="{% if request.url.path == '/excel' %}active{% endif %}">
+                <i class="fas fa-file-excel"></i> Procesar Pedidos
+            </a>
+            <a href="/pdf" class="{% if request.url.path == '/pdf' %}active{% endif %}">
+                <i class="fas fa-tags"></i> Etiquetar con SKU
+            </a>
+            <a href="/tracking" class="{% if request.url.path == '/tracking' %}active{% endif %}">
+                <i class="fas fa-truck"></i> Subir Seguimientos
+            </a>
+            <a href="/settings" class="{% if request.url.path == '/settings' %}active{% endif %}">
+                <i class="fas fa-cog"></i> Configuración
+            </a>
+        </nav>
+    </div>
+
+    <!-- Overlay -->
+    <div id="overlay" class="overlay"></div>
+
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+
+    <script src="/static/js/main.js"></script>
+    <script>
+        // Store Selector Logic
+        async function initStoreSelector() {
+            try {
+                const resp = await fetch('/api/me/stores');
+                if (!resp.ok) return;
+                const stores = await resp.json();
+                const select = document.getElementById('globalStoreSelect');
+
+                if (!stores || stores.length === 0) {
+                    return;
+                }
+
+                select.style.display = 'block';
+
+                // Active ID from cookie
+                const getCookie = (name) => {
+                    const value = `; ${document.cookie}`;
+                    const parts = value.split(`; ${name}=`);
+                    if (parts.length === 2) return parts.pop().split(';').shift();
+                }
+                const activeId = getCookie('andreani_active_store');
+
+                stores.forEach(store => {
+                    const opt = document.createElement('option');
+                    opt.value = store.id;
+                    opt.textContent = store.name || `Tienda ${store.tiendanube_user_id}`;
+                    if (String(store.id) === String(activeId)) opt.selected = true;
+                    select.appendChild(opt);
+                });
+
+                select.addEventListener('change', async (e) => {
+                    const newId = e.target.value;
+                    await fetch('/api/set-active-store', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ store_id: newId })
+                    });
+                    window.location.reload();
+                });
+
+            } catch (e) {
+                console.error("Store fetch error", e);
+            }
+        }
+
+        // Sidebar Toggle Logic
+        document.addEventListener('DOMContentLoaded', () => {
+            initStoreSelector(); // Init selector
+
+            const toggleBtn = document.getElementById('menuToggle');
+            const closeBtn = document.getElementById('menuClose');
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('overlay');
+
+            function openMenu() {
+                sidebar.classList.add('open');
+                overlay.classList.add('open');
+            }
+
+            function closeMenu() {
+                sidebar.classList.remove('open');
+                overlay.classList.remove('open');
+            }
+
+            if (toggleBtn) toggleBtn.addEventListener('click', openMenu);
+            if (closeBtn) closeBtn.addEventListener('click', closeMenu);
+            if (overlay) overlay.addEventListener('click', closeMenu);
+        });
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+
+</html>
