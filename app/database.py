@@ -16,7 +16,15 @@ if not DATABASE_URL:
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-engine = create_engine(DATABASE_URL, echo=False)
+connect_args = {}
+# Support for PGOPTIONS to set schema (e.g. "-c search_path=auth")
+# Only apply if using Postgres
+if DATABASE_URL.startswith("postgresql"):
+    pg_options = os.getenv("PGOPTIONS")
+    if pg_options:
+        connect_args["options"] = pg_options
+
+engine = create_engine(DATABASE_URL, echo=False, connect_args=connect_args)
 
 def init_db():
     if os.getenv("ENV") != "production":

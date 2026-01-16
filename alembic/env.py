@@ -39,6 +39,25 @@ def get_url():
         url = url.replace("postgres://", "postgresql://", 1)
     return url
 
+def get_schema_from_env():
+    """
+    Extracts schema from PGOPTIONS if set (e.g. '-c search_path=auth').
+    Returns None if not found or if PGOPTIONS is missing.
+    """
+    pg_options = os.getenv("PGOPTIONS")
+    if pg_options and "search_path=" in pg_options:
+        # Example: "-c search_path=auth" -> "auth"
+        try:
+            # Split by 'search_path=' and take the second part, then split by space/end
+            # This is a basic parser, assumes standard format
+            parts = pg_options.split("search_path=")
+            if len(parts) > 1:
+                schema = parts[1].strip().split(" ")[0]
+                return schema
+        except Exception:
+            pass
+    return None
+
 def run_migrations_offline():
     """Run migrations in 'offline' mode.
 
@@ -52,11 +71,15 @@ def run_migrations_offline():
 
     """
     url = get_url()
+    schema = get_schema_from_env()
+    
     context.configure(
         url=url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        version_table_schema=schema, # Set explicit schema for alembic_version (None = default)
+        include_schemas=True if schema else False # If specific schema is targeted, you might want this
     )
 
     with context.begin_transaction():
@@ -73,15 +96,29 @@ def run_migrations_online():
     configuration = config.get_section(config.config_ini_section)
     configuration["sqlalchemy.url"] = get_url()
     
+    # Pass PGOPTIONS to the engine connection if present, BUT only for Postgres
+    connect_args = {}
+    url = get_url()
+    if url.startswith("postgresql"):
+        pg_options = os.getenv("PGOPTIONS")
+        if pg_options:
+            connect_args["options"] = pg_options
+
     connectable = engine_from_config(
         configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=connect_args, # Ensure engine uses the search_path
     )
+    
+    schema = get_schema_from_env()
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection, 
+            target_metadata=target_metadata,
+            version_table_schema=schema, # Ensure alembic_version table goes to 'auth' if schema is 'auth'
+            include_schemas=True if schema else False
         )
 
         with context.begin_transaction():

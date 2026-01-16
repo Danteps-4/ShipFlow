@@ -31,3 +31,10 @@ class TiendaNubeToken(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     
     store: Optional[Store] = Relationship(back_populates="token")
+
+class UserSession(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    token_hash: str = Field(unique=True, index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    expires_at: datetime
