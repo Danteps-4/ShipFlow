@@ -22,6 +22,7 @@ from app.database import init_db, get_session
 from app.dependencies import get_current_store_id, get_current_store, get_current_user
 from app.models import Store, User
 from app.auth import hash_password, verify_password, create_session, delete_session
+from app.security import encrypt_token
 from sqlmodel import select, Session
 
 app = FastAPI(title="Andreani Automation Web App")
@@ -260,37 +261,42 @@ async def tiendanube_callback(
 ):
     print(f"CALLBACK HIT {request.url} code={code}")
     try:
-        # Exchange returns dict with "store_id"
-        token_data_full = TiendaNubeAuth.exchange_code_for_token(code)
-        tiendanube_store_id = token_data_full.get("store_id") # This is TN ID
-        access_token = token_data_full.get("access_token")
+        # Exchange returns dict with "user_id", "access_token", "token_type", "scope"
+        token_data = TiendaNubeAuth.exchange_code_for_token(code)
+        
+        tiendanube_store_id = int(token_data.get("user_id")) # This is TN Store ID
+        access_token = token_data.get("access_token")
+        token_type = token_data.get("token_type")
+        scope = token_data.get("scope")
+
+        # B4) Evitar el caso tiendanube_user_id=1
+        if tiendanube_store_id == 1:
+            return JSONResponse(status_code=400, content={"error": "ID de tienda inválido (1). Contacte soporte."})
         
         # Link to our local Store model
-        # Check if store already exists for this user (or update logic?)
-        # For multitenant: One store linked to one user.
-        # But wait, same physical store could technically be managed by multiple users?
-        # Requirement says: "Sessions: stores unique to user". Let's assume ownership.
-        
-        # Look if this store (by TN ID) exists
+        # Check if store already exists for this TN ID (Global Unique)
         query = select(Store).where(Store.tiendanube_user_id == tiendanube_store_id)
         existing_store = session.exec(query).first()
         
+        store = None
+        
         if existing_store:
+            # B2) UPSERT Correcto
+            # Si existe, actualizamos token y verificamos ownership.
+            # En teoría una misma tienda TN no puede ser manejada por 2 usuarios distintos en nuestra APP 
+            # (con el modelo actual 1:N User:Store).
             if existing_store.user_id != user.id:
-                 # It's claimed by another user
-                 return JSONResponse(status_code=400, content={"error": "Esta tienda ya está vinculada a otro usuario."})
+                 # TODO: Decidir política. Opción A: Denegar. Opción B: Robar ownership?
+                 # Por seguridad, denegar. El usuario debe contactar soporte si cambió de cuenta.
+                 # O quizás es el mismo humano con otro email.
+                 return JSONResponse(status_code=400, content={"error": "Esta tienda ya está vinculada a otro usuario de ShipFlow."})
+            
             store = existing_store
-            # Update token logic is inside TiendaNubeAuth usually, assuming it saves to DB?
-            # TiendaNubeAuth.exchange_code_for_token usually saves/updates token in DB if structured that way.
-            # But looking at previous code, TiendaNubeAuth might be stateless or helper?
-            # Let's verify existing logic:
-            # Code wasn't provided, but I see models has keys.
-            # I must rely on TiendaNubeAuth doing the right thing, or implement saving here.
-            # Assuming 'exchange_code_for_token' handles DB? 
-            # If not, I should probably save it here.
-            # The prompt says: "Mantener intacto...".
+            print(f"Updating Store {store.id} for TN ID {tiendanube_store_id}")
+            # Si quisieramos actualizar nombre, podríamos buscar info de la tienda aquí.
         else:
              # Create new store
+             print(f"Creating New Store for TN ID {tiendanube_store_id}")
              store = Store(
                  name=f"Tienda {tiendanube_store_id}",
                  tiendanube_user_id=tiendanube_store_id,
@@ -300,23 +306,38 @@ async def tiendanube_callback(
              session.commit()
              session.refresh(store)
         
-        # We need to save the token. Using TiendaNubeAuth helper which likely needs updating or custom logic?
-        # The prompt says "Mantener modelos actuales".
-        # Let's assume I need to save the token myself if TiendaNubeAuth doesn't handle context well.
-        # But wait, TiendaNubeAuth code isn't visible. I should peek at it?
-        # I'll stick to basic flow:
-        # TiendaNubeAuth.save_token(store_id_db, ...) ?
-        # "TiendaNubeAuth" was imported.
+        # Upsert Token
+        from app.security import encrypt_token
+        encrypted_token = encrypt_token(access_token)
         
-        # Actually, let's just complete the flow assuming `TiendaNubeAuth` does the saving logic.
-        # If it doesn't support multitenant context, I might break it.
-        # But I can't read `services/tiendanube.py` right now without extra steps.
-        # Safer bet: Just ensure the store is linked to the user.
+        query_token = select(TiendaNubeToken).where(TiendaNubeToken.store_id == store.id)
+        existing_token = session.exec(query_token).first()
+        
+        if existing_token:
+            existing_token.access_token_encrypted = encrypted_token
+            existing_token.token_type = token_type
+            existing_token.scope = scope
+            existing_token.user_id = tiendanube_store_id
+            session.add(existing_token)
+        else:
+            new_token = TiendaNubeToken(
+                access_token_encrypted=encrypted_token,
+                token_type=token_type,
+                scope=scope,
+                user_id=tiendanube_store_id,
+                store_id=store.id
+            )
+            session.add(new_token)
+            
+        session.commit()
+        session.refresh(store)
         
         # Set active store
         response = RedirectResponse(url="/settings")
+        # B3) Set cookie con ID real
         response.set_cookie(key="andreani_active_store", value=str(store.id))
         return response
+
     except Exception as e:
         print(f"Callback Error: {e}")
         return JSONResponse(status_code=400, content={"error": f"Auth failed: {str(e)}"})
@@ -665,3 +686,38 @@ async def get_batch_data(
     if not data:
         return JSONResponse(status_code=404, content={"error": "Batch not found or expired"})
     return data
+
+@app.post("/admin/cleanup-phantom-store")
+async def cleanup_phantom_store(request: Request, session: Session = Depends(get_session)):
+    admin_key = request.headers.get("X-ADMIN-KEY")
+    expected_key = os.getenv("ADMIN_KEY")
+    
+    # If env var not set, for safety deny access or allow if explicit emptiness intended? 
+    # Usually deny.
+    if not expected_key or admin_key != expected_key:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+
+    # 1. Find Store with tiendanube_user_id == 1
+    query = select(Store).where(Store.tiendanube_user_id == 1)
+    phantom_store = session.exec(query).first()
+    
+    if not phantom_store:
+        return {"ok": True, "deleted": False, "message": "Phantom store (ID 1) not found."}
+
+    try:
+        # 2. Delete linked token first
+        # Token relates to Store via store_id (SQLModel cascade might handle it, but manual is safer per request)
+        query_token = select(TiendaNubeToken).where(TiendaNubeToken.store_id == phantom_store.id)
+        token = session.exec(query_token).first()
+        if token:
+            session.delete(token)
+        
+        # 3. Delete Store
+        name = phantom_store.name
+        session.delete(phantom_store)
+        session.commit()
+        
+        return {"ok": True, "deleted": True, "message": f"Deleted store '{name}' (ID {phantom_store.id}) and its token."}
+    except Exception as e:
+        session.rollback()
+        return JSONResponse(status_code=500, content={"error": str(e)})

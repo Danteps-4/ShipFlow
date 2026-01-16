@@ -12,10 +12,13 @@ load_dotenv()
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 REDIRECT_URI = os.getenv("REDIRECT_URI")
+
+from app.security import decrypt_token
+# Note: TiendaNubeAuth is now stateless regarding DB writes for token exchange
+# Token validation still needs DB reading (get_valid_token)
+from app.models import TiendaNubeToken
+from app.database import get_session
 from sqlmodel import select
-from app.database import engine, get_session
-from app.models import TiendaNubeToken, Store, User
-from app.security import encrypt_token, decrypt_token
 
 class TiendaNubeAuth:
     @staticmethod
@@ -40,7 +43,6 @@ class TiendaNubeAuth:
         }
         resp = requests.post(url, json=data)
         
-        # Log status and partial body (avoid logging raw secrets if possible, but identifying error is key)
         print(f"Token Exchange Status: {resp.status_code}")
         try:
             token_data = resp.json()
@@ -53,88 +55,42 @@ class TiendaNubeAuth:
         token_type = token_data.get("token_type")
         user_id = token_data.get("user_id")
         
-        if not access_token or not token_type or not user_id:
+        if not access_token or not token_type:
              # Log partial details for debugging
              safe_log = {k: v for k, v in token_data.items() if k != 'access_token'}
              print(f"Token Exchange Failed Validation: {safe_log}")
-             raise ValueError(f"Missing critical fields in token response. Status={resp.status_code}")
+             raise ValueError(f"Missing access_token or token_type. Status={resp.status_code}")
+
+        # Fallback: Fetch User ID if missing from token response
+        if not user_id:
+            print("User ID missing in token response. Fetching from /users/me equivalent...")
+            # We need to instantiate a temp client or just use requests
+            # Tiendanube API usually provides store info at /v1/{store_id}/... but we don't have store_id?
+            # Actually, user_id usually IS the store_id in context of TN? Or access_token has it.
+            # Let's try to get store info if possible. 
+            # However, standard TN OAuth response SHOULD include user_id.
+            # If strictly missing, we can try to call an endpoint if we knew which one.
+            # TN API docs say /v1/{store_id}/... 
+            # Without store_id, we are stuck?
+            # Wait, usually the 'user_id' in the response *is* the store_id.
+            # If it's missing, let's error for now, or assume the user suggestion implies there's a way.
+            # Assuming 'user_id' is mandatory as per previous code.
+            raise ValueError(f"Missing user_id in token response. Cannot identify store. Response: {token_data}")
 
         if resp.status_code != 200:
-             # Even if fields exist, if status is bad, we shouldn't trust it, but usually successful response is 200
              raise ValueError(f"Error exchanging code: {resp.text}")
 
         # If we reached here, data is valid
         print(f"Token Exchange Success. User ID (TN Store ID): {user_id}")
 
-        store_id_internal = None
+        return {
+            "access_token": access_token,
+            "token_type": token_type,
+            "user_id": int(user_id), # Ensure int
+            "scope": token_data.get("scope"),
+            "expires_in": token_data.get("expires_in")
+        }
 
-        # Save to DB
-        with next(get_session()) as session:
-            # 0. Ensure Admin User Exists (Sprint 2 Temporary)
-            admin_user_id = 1
-            admin_user = session.get(User, admin_user_id)
-            if not admin_user:
-                print("Admin User (ID 1) not found. Creating default admin.")
-                admin_user = User(
-                    id=1, # Force ID 1
-                    email="admin@example.com",
-                    password_hash="pbkdf2:sha256:260000$placeholder$hash", # Placeholder, auth not active yet
-                    is_admin=True
-                )
-                session.add(admin_user)
-                session.commit()
-                # No refresh needed, we know ID is 1
-            
-            # 1. Find or Create Store
-            statement_store = select(Store).where(Store.tiendanube_user_id == int(user_id))
-            store = session.exec(statement_store).first()
-            
-            if not store:
-                print(f"New Store detected for TN ID {user_id}. Creating...")
-                
-                store = Store(
-                    name=f"Tienda {user_id}",
-                    tiendanube_user_id=int(user_id),
-                    user_id=admin_user_id
-                )
-                session.add(store)
-                session.commit()
-                session.refresh(store)
-            
-            store_id_internal = store.id
-            
-            # 2. Update/Create Token linked to this Store
-            # ... (rest remains same) ...
-            # 2. Update/Create Token linked to this Store
-            # Check existence by Store ID (Unique Constraint)
-            statement_token = select(TiendaNubeToken).where(TiendaNubeToken.store_id == store.id)
-            existing_token = session.exec(statement_token).first()
-            
-            encrypted_access_token = encrypt_token(access_token)
-            
-            if existing_token:
-                print(f"Updating existing token for Store {store.id}")
-                existing_token.access_token_encrypted = encrypted_access_token
-                existing_token.token_type = token_type
-                existing_token.scope = token_data.get("scope")
-                existing_token.user_id = int(user_id) 
-                session.add(existing_token)
-            else:
-                print(f"Creating new token for Store {store.id}")
-                new_token = TiendaNubeToken(
-                    access_token_encrypted=encrypted_access_token,
-                    token_type=token_type,
-                    scope=token_data.get("scope"),
-                    user_id=int(user_id),
-                    store_id=store.id
-                )
-                session.add(new_token)
-            
-            session.commit()
-            
-        # Return merged data including our internal store_id
-        token_data["store_id"] = store_id_internal
-        return token_data
 
     @staticmethod
     def get_valid_token(store_id: int = None):

@@ -31,13 +31,23 @@
                             <td>{{ store.name }}</td>
                             <td>{{ store.tiendanube_user_id }}</td>
                             <td>
+                                {% if store.token %}
                                 <span class="badge bg-success">Conectado</span>
+                                {% else %}
+                                <span class="badge bg-danger">No Conectado</span>
+                                {% endif %}
                             </td>
                             <td>
+                                {% if store.token %}
                                 <button class="btn btn-sm btn-outline-primary btn-set-active"
                                     data-store-id="{{ store.id }}">
                                     Usar esta tienda
                                 </button>
+                                {% else %}
+                                <a href="/tiendanube/login" class="btn btn-sm btn-outline-warning">
+                                    Reconectar
+                                </a>
+                                {% endif %}
                             </td>
                         </tr>
                         {% endfor %}
