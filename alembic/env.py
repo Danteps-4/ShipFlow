@@ -1,7 +1,52 @@
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config
+from sqlalchemy import engine_from_config, text
 from sqlalchemy import pool
+
+# ... (omitted)
+
+def run_migrations_online():
+    """Run migrations in 'online' mode.
+
+    In this scenario we need to create an Engine
+    and associate a connection with the context.
+
+    """
+    configuration = config.get_section(config.config_ini_section)
+    configuration["sqlalchemy.url"] = get_url()
+    
+    # Pass PGOPTIONS to the engine connection if present, BUT only for Postgres
+    connect_args = {}
+    url = get_url()
+    if url.startswith("postgresql"):
+        pg_options = os.getenv("PGOPTIONS")
+        if pg_options:
+            connect_args["options"] = pg_options
+
+    connectable = engine_from_config(
+        configuration,
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,
+        connect_args=connect_args, # Ensure engine uses the search_path
+    )
+    
+    schema = get_schema_from_env()
+
+    with connectable.connect() as connection:
+        # Auto-create schema if needed (Postgres only)
+        if schema and connection.dialect.name == "postgresql":
+            connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
+            connection.commit()
+
+        context.configure(
+            connection=connection, 
+            target_metadata=target_metadata,
+            version_table_schema=schema, # Ensure alembic_version table goes to 'auth' if schema is 'auth'
+            include_schemas=True if schema else False
+        )
+
+        with context.begin_transaction():
+            context.run_migrations()
 
 from alembic import context
 from sqlmodel import SQLModel
@@ -114,6 +159,11 @@ def run_migrations_online():
     schema = get_schema_from_env()
 
     with connectable.connect() as connection:
+        # Auto-create schema if needed (Postgres only)
+        if schema and connection.dialect.name == "postgresql":
+            connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
+            connection.commit()
+
         context.configure(
             connection=connection, 
             target_metadata=target_metadata,
