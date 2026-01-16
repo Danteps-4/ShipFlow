@@ -129,6 +129,14 @@ async def login(data: UserAuth, session: Session = Depends(get_session)):
     )
     return response
 
+@app.get("/auth/register")
+async def register_get_redirect():
+    return RedirectResponse("/register")
+
+@app.get("/auth/login")
+async def login_get_redirect():
+    return RedirectResponse("/login")
+
 @app.get("/auth/me")
 async def get_me(user: User = Depends(get_current_user)):
     return {
