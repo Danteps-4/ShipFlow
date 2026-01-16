@@ -78,7 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             // Step 1: Upload
-            const responseUpload = await fetch('/api/tracking/upload', {
+            const responseUpload = await fetch('/api/update-tracking', {
                 method: 'POST',
                 body: formData
             });

@@ -176,30 +176,11 @@ async def get_my_stores(session: Session = Depends(get_session)):
 
 @app.post("/api/update-tracking")
 async def update_tracking_codes(file: UploadFile = File(...), store_id: int = Depends(get_current_store_id)):
-    token_data = TiendaNubeAuth.get_valid_token(store_id)
-    if not token_data:
-        return JSONResponse(status_code=401, content={"error": "Not authenticated or no active store selected."})
-    
-    try:
-        content = await file.read()
-        
-        store_id_tn = token_data.get("user_id") # TN Store ID
-        access_token = token_data.get("access_token")
-        
-        if not access_token:
-            raise RuntimeError("Missing access_token")
-        
-        client = TiendaNubeClient(store_id=store_id_tn, access_token=access_token)
-        result = client.process_tracking_file(content)
-        return result
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
-
-# --- Batch Tracking Support ---
-BATCH_TRACKING_STORE = {}
-
-@app.post("/api/tracking/upload")
-async def upload_tracking_file(file: UploadFile = File(...), store_id: int = Depends(get_current_store_id)):
+    """
+    Starts the batch tracking update process.
+    Parses the file and initializes a batch. 
+    Returns { "ok": true, "batch_id": "...", "total": N }
+    """
     token_data = TiendaNubeAuth.get_valid_token(store_id)
     if not token_data:
         return JSONResponse(status_code=401, content={"error": "Not authenticated."})
@@ -220,7 +201,7 @@ async def upload_tracking_file(file: UploadFile = File(...), store_id: int = Dep
             "processed": 0,
             "results": [],
             "store_id": store_id,
-            "client_data": token_data # Cache token data to avoid re-fetching/decrypting? allow re-fetch for safety.
+            "client_data": token_data
         }
         
         return {
@@ -230,6 +211,9 @@ async def upload_tracking_file(file: UploadFile = File(...), store_id: int = Dep
         }
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+# Removed /api/tracking/upload as we are using /api/update-tracking now
+
 
 @app.post("/api/tracking/batch/{batch_id}")
 async def process_tracking_batch(batch_id: str, limit: int = 20):
